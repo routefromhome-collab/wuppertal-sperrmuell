@@ -45,6 +45,10 @@ def atomic_write_json(path: Path, payload) -> None:
 
 def entry_from_result(res: StreetResult, now_iso: str) -> dict:
     entry: dict = {"fetched": now_iso, "dates": [d.isoformat() for d in res.dates]}
+    if res.status == "not_found":
+        entry["not_found"] = True  # в AWG такой улицы нет: не считаем сбоем и не перезапрашиваем до срока
+    if res.covered_until:
+        entry["until"] = res.covered_until.isoformat()
     if res.houses:
         entry["houses"] = {h: [d.isoformat() for d in ds] for h, ds in res.houses.items()}
     return entry
@@ -110,12 +114,19 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as e:  # noqa: BLE001 - не роняем весь прогон из-за одной улицы
                 log.exception("%s: %s", street, e)
                 res = StreetResult("error")
-            if res.status == "ok":
+            if res.status in ("ok", "not_found"):
                 updated[street] = entry_from_result(res, now.isoformat())
             else:
                 failed[street] = res.status
             if n % 100 == 0 or n == len(todo):
                 log.info("Прогресс %d/%d, запросов к AWG: %d", n, len(todo), client.requests_made)
+
+    missing = sorted(s for s, e in updated.items() if e.get("not_found"))
+    for street in missing[:30]:
+        log.info("Нет в AWG: %s", street)
+    if len(missing) >= 10 and len(missing) / len(todo) > 0.2:
+        log.error("Слишком много улиц «не найдено» (%d из %d): вероятно, изменилась форма поиска", len(missing), len(todo))
+        return 2
 
     ratio = len(failed) / len(todo)
     for street, status in sorted(failed.items())[:30]:
@@ -127,11 +138,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     known.update(updated)
+    untils = [e["until"] for e in known.values() if e.get("until")]
     schedule.update(
         version=SCHEMA_VERSION,
         generated_at=now.isoformat(),
         pickup_to_putout_shift_days=1,
         failed=sorted(failed),
+        not_found=sorted(s for s, e in known.items() if e.get("not_found")),
+        covered_until=min(untils) if untils else None,  # граница публикации календаря AWG
     )
     if args.dry_run:
         log.info("dry-run: запись пропущена")
