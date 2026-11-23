@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--min-delay", type=float, default=0.12, help="пауза между запросами, сек")
     p.add_argument("--max-fail-ratio", type=float, default=0.05)
+    p.add_argument("--min-fail-count", type=int, default=3, help="порог сбоев срабатывает, только если их не меньше N")
+    p.add_argument("--debug-dir", help="сохранять HTML нераспознанных страниц и образцы сюда")
     p.add_argument("--dry-run", action="store_true", help="не записывать файл")
     args = p.parse_args(argv)
 
@@ -94,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     if not todo:
         return 0
 
-    client = AwgClient(min_delay=args.min_delay)
+    client = AwgClient(min_delay=args.min_delay, debug_dir=args.debug_dir)
     client.load_form()
 
     updated: dict[str, dict] = {}
@@ -120,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("Сбой: %s -> %s", street, status)
     log.info("Успешно: %d, сбоев: %d (%.1f%%)", len(updated), len(failed), ratio * 100)
 
-    if ratio > args.max_fail_ratio:
+    if ratio > args.max_fail_ratio and len(failed) >= args.min_fail_count:
         log.error("Сбоев больше порога %.0f%%, файл НЕ перезаписан", args.max_fail_ratio * 100)
         return 2
 
