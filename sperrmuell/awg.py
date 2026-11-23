@@ -24,6 +24,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
+from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
@@ -101,7 +102,8 @@ def parse_calendar(html: str) -> list[date]:
             try:
                 result.add(date(ym[0], ym[1], day))
             except ValueError:
-                log.warning("Некорректная дата %s-%s-%s", ym[0], ym[1], day)
+                # ячейка не день календаря (легенда, итоги и т.п.): пропускаем
+                log.debug("Пропущена ячейка с числом %s в %s-%s", day, ym[0], ym[1])
     return sorted(result)
 
 
@@ -137,7 +139,15 @@ class StreetResult:
 class AwgClient:
     """Вежливый клиент: общий лимит частоты на все потоки, ретраи с backoff."""
 
-    def __init__(self, min_delay: float = 0.12, timeout: int = 25, retries: int = 5):
+    def __init__(
+        self,
+        min_delay: float = 0.12,
+        timeout: int = 25,
+        retries: int = 5,
+        debug_dir: str | None = None,
+    ):
+        self.debug_dir = debug_dir
+        self._dumped: dict[str, int] = {}
         self.session = requests.Session()
         self.min_delay = min_delay
         self.timeout = timeout
@@ -196,6 +206,21 @@ class AwgClient:
             if i.get("name")
         }
 
+    def _dump(self, street: str, kind: PageKind, html: str) -> None:
+        """Сохраняет HTML для диагностики: все нераспознанные (до 25) и по 3 образца остальных."""
+        if not self.debug_dir:
+            return
+        limit = 25 if kind in (PageKind.UNKNOWN, PageKind.SIMILAR) else 3
+        with self._lock:
+            n = self._dumped.get(kind.value, 0)
+            if n >= limit:
+                return
+            self._dumped[kind.value] = n + 1
+        safe = re.sub(r"[^\w.-]+", "_", street)[:60]
+        path = Path(self.debug_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / f"{kind.value}__{safe}.html").write_text(html, encoding="utf-8")
+
     # --- разбор одной улицы ---
     def fetch_street(self, street: str) -> StreetResult:
         data = dict(self.form_data)
@@ -207,6 +232,7 @@ class AwgClient:
 
     def _resolve(self, html: str, url: str, street: str, depth: int) -> StreetResult:
         kind = classify_page(html)
+        self._dump(street, kind, html)
         if kind is PageKind.CALENDAR:
             return StreetResult("ok", dates=parse_calendar(html))
 
