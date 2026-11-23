@@ -63,6 +63,9 @@ jobs:
             git push
           fi
 
-      - name: Сообщить админу о сбое
+            - name: Сообщить админу о сбое
         if: failure()
-        run: python -m sperrmuell.notify "❌ Update schedule упал: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python -m sperrmuell.notify "❌ Update schedule failed. $RUN_URL"
