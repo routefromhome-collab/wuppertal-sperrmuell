@@ -1,0 +1,50 @@
+name: Publish
+
+# Ручная публикация списка улиц в канал: вводите дату, получаете 7 дней (введённая дата = день 1).
+# Парсинга AWG здесь нет: берутся данные из web/data/schedule.json.
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Первый день выставления, YYYY-MM-DD"
+        required: true
+      days:
+        description: "Сколько дней"
+        default: "7"
+      dry_run:
+        description: "Только показать в логе, ничего не отправлять"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+      MINIAPP_URL: ${{ vars.MINIAPP_URL }} # например https://t.me/<бот>/<короткое_имя_приложения>
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Публикация
+        env:
+          START: ${{ inputs.start_date }}
+          DAYS: ${{ inputs.days }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          ARGS="--start $START --days $DAYS"
+          if [ "$DRY" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python -m sperrmuell.publish $ARGS

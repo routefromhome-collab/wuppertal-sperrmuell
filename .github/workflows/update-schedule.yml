@@ -1,0 +1,68 @@
+name: Update schedule
+
+# Обновляет web/data/schedule.json (календарь AWG) и coords.json (координаты улиц).
+# Публикации в канал здесь нет: за неё отвечает workflow «Publish».
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Перезапросить все улицы, игнорируя возраст записей"
+        type: boolean
+        default: false
+      limit:
+        description: "Не больше N улиц (для испытаний; пусто = все)"
+        required: false
+  schedule:
+    - cron: "17 3 1 * *" # раз в месяц, 1-го числа; удалите блок, если нужен только ручной запуск
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-schedule
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+      NOMINATIM_USER_AGENT: wuppertal-sperrmuell/1.0 (https://github.com/${{ github.repository }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Календарь AWG
+        env:
+          FORCE: ${{ inputs.force }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          ARGS=""
+          if [ "$FORCE" = "true" ]; then ARGS="$ARGS --force"; fi
+          if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          python -m sperrmuell.build_schedule $ARGS
+
+      - name: Координаты улиц
+        run: python -m sperrmuell.geocode
+
+      - name: Коммит данных
+        run: |
+          git config user.name  "sperrmuell-bot"
+          git config user.email "sperrmuell-bot@users.noreply.github.com"
+          git add web/data data/geocode_failed.json
+          if git diff --cached --quiet; then
+            echo "Изменений нет"
+          else
+            git commit -m "data: update schedule $(date -u +%F)"
+            git push
+          fi
+
+      - name: Сообщить админу о сбое
+        if: failure()
+        run: python -m sperrmuell.notify "❌ Update schedule упал: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
