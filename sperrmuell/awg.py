@@ -22,7 +22,7 @@ import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from enum import Enum
 from pathlib import Path
 from urllib.parse import urljoin
@@ -46,6 +46,7 @@ class PageKind(str, Enum):
     CALENDAR = "calendar"  # календарь с днями
     HOUSES = "houses"  # выбор номера дома
     SIMILAR = "similar"  # список похожих улиц
+    NOT_FOUND = "not_found"  # форма поиска без результатов
     UNKNOWN = "unknown"  # вёрстка не распознана
 
 
@@ -73,28 +74,48 @@ def _month_of(month_div: Tag) -> tuple[int, int] | None:
     return None
 
 
-def _has_sperrmuell(cell: Tag) -> bool:
-    return cell.find(attrs={"title": re.compile("sperrm", re.I)}) is not None
+_FULL_DATE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4})")
+
+
+def _is_sperrmuell_icon(tag: Tag) -> bool:
+    """Иконка Sperrmüll: <i class="bin bin-bulk" title="Sperrmüll">. Ищем только среди <i>."""
+    return tag.find("i", class_="bin-bulk") is not None or tag.find(
+        "i", attrs={"title": re.compile("sperrm", re.I)}
+    ) is not None
 
 
 def _day_of(cell: Tag) -> int | None:
     span = cell.find("span") if cell.name == "div" else None
-    text = (span or cell).get_text(" ", strip=True)
-    m = _DIGITS.search(text)
+    m = _DIGITS.search((span or cell).get_text(" ", strip=True))
     return int(m.group()) if m else None
 
 
-def parse_calendar(html: str) -> list[date]:
-    """Все даты вывоза Sperrmüll (по AWG, без сдвига D-1) на странице календаря."""
+def _parse_rows(soup: BeautifulSoup) -> set[date]:
+    """Актуальная вёрстка AWG (с 2026): строки tr.day, дата dd.mm.yyyy в .weekday, иконки в соседней ячейке."""
+    found: set[date] = set()
+    for tr in soup.select("tr.day"):
+        label = tr.select_one(".weekday") or tr
+        m = _FULL_DATE.search(label.get_text(" ", strip=True))
+        if not m or not _is_sperrmuell_icon(tr):
+            continue
+        try:
+            found.add(date(int(m.group(3)), int(m.group(2)), int(m.group(1))))
+        except ValueError:
+            log.debug("Некорректная дата %s", m.group(0))
+    return found
+
+
+def _parse_legacy(soup: BeautifulSoup) -> set[date]:
+    """Старая вёрстка (div.month > div.day / td). Запасной вариант, если tr.day на странице нет."""
     result: set[date] = set()
-    for month_div in _soup(html).find_all("div", class_="month"):
+    for month_div in soup.find_all("div", class_="month"):
         ym = _month_of(month_div)
         if not ym:
             continue
         for cell in month_div.select("div.day, td"):
             if cell.name == "td" and cell.find("div", class_="day"):
-                continue  # ячейка-обёртка, день посчитаем во вложенном div
-            if not _has_sperrmuell(cell):
+                continue
+            if not _is_sperrmuell_icon(cell):
                 continue
             day = _day_of(cell)
             if day is None:
@@ -102,20 +123,37 @@ def parse_calendar(html: str) -> list[date]:
             try:
                 result.add(date(ym[0], ym[1], day))
             except ValueError:
-                # ячейка не день календаря (легенда, итоги и т.п.): пропускаем
                 log.debug("Пропущена ячейка с числом %s в %s-%s", day, ym[0], ym[1])
-    return sorted(result)
+    return result
+
+
+def parse_calendar(html: str) -> list[date]:
+    """Все даты вывоза Sperrmüll (по AWG, без сдвига D-1) на странице календаря."""
+    soup = _soup(html)
+    return sorted(_parse_rows(soup) if soup.select_one("tr.day") else _parse_legacy(soup))
+
+
+def calendar_coverage(html: str) -> date | None:
+    """Последний день последнего месяца, показанного в календаре (граница публикации AWG)."""
+    months = [ym for d in _soup(html).find_all("div", class_="month") if (ym := _month_of(d))]
+    if not months:
+        return None
+    y, m = max(months)
+    return date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)
 
 
 def classify_page(html: str) -> PageKind:
     soup = _soup(html)
     if HOUSES_MARKER in soup.get_text(" ", strip=True):
         return PageKind.HOUSES
-    month_divs = soup.find_all("div", class_="month")
-    if any(d.find("div") or d.find("td") for d in month_divs):
+    if soup.select_one("tr.day") or any(
+        d.find("div") or d.find("td") for d in soup.find_all("div", class_="month")
+    ):
         return PageKind.CALENDAR
     if soup.select('a[href*="streetname"]'):
         return PageKind.SIMILAR
+    if soup.find("form", attrs={"name": "demand"}):
+        return PageKind.NOT_FOUND  # пустая форма поиска: такой улицы в AWG нет
     return PageKind.UNKNOWN
 
 
@@ -134,6 +172,7 @@ class StreetResult:
     status: str  # ok | not_found | unrecognized | error
     dates: list[date] = field(default_factory=list)  # улица целиком
     houses: dict[str, list[date]] = field(default_factory=dict)  # по номерам домов
+    covered_until: date | None = None  # до какого дня AWG опубликовал календарь
 
 
 class AwgClient:
@@ -234,16 +273,22 @@ class AwgClient:
         kind = classify_page(html)
         self._dump(street, kind, html)
         if kind is PageKind.CALENDAR:
-            return StreetResult("ok", dates=parse_calendar(html))
+            return StreetResult("ok", dates=parse_calendar(html), covered_until=calendar_coverage(html))
+
+        if kind is PageKind.NOT_FOUND:
+            return StreetResult("not_found")
 
         if kind is PageKind.HOUSES:
             houses: dict[str, list[date]] = {}
+            until: list[date] = []
             for house, link in extract_links(html, url):
                 page = self._request("GET", link)
                 if page is None:
                     return StreetResult("error")
                 houses[house] = parse_calendar(page)
-            return StreetResult("ok", houses=houses)
+                if (c := calendar_coverage(page)) is not None:
+                    until.append(c)
+            return StreetResult("ok", houses=houses, covered_until=min(until) if until else None)
 
         if kind is PageKind.SIMILAR and depth == 0:
             wanted = normalize_street_name(street)
