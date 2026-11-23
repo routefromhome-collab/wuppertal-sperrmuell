@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="color-scheme" content="light dark">
+  <title>Шпера Wuppertal</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="top__row">
+        <h1 class="top__title">🗑 Шпера</h1>
+        <div class="datepick">
+          <button id="prev" class="icon-btn" type="button" aria-label="Сдвинуть на день назад">‹</button>
+          <input id="date" type="date" aria-label="Первый день списка">
+          <button id="next" class="icon-btn" type="button" aria-label="Сдвинуть на день вперёд">›</button>
+        </div>
+      </div>
+      <nav id="days" class="days" aria-label="7 дней от выбранной даты"></nav>
+    </header>
+
+    <div id="banner" class="banner" role="status" hidden></div>
+
+    <main class="main">
+      <div id="map" aria-label="Карта улиц"></div>
+
+      <section id="sheet" class="sheet" aria-label="Список улиц">
+        <button id="sheetToggle" class="sheet__head" type="button" aria-expanded="true" aria-controls="list">
+          <span class="sheet__grip" aria-hidden="true"></span>
+          <span id="sheetTitle" class="sheet__title">Загрузка…</span>
+          <span id="sheetSub" class="sheet__sub"></span>
+        </button>
+        <div class="sheet__tools">
+          <input id="search" type="search" placeholder="Поиск улицы" aria-label="Поиск улицы" autocomplete="off">
+          <button id="nearest" class="btn" type="button">📍 Рядом</button>
+          <button id="routeBtn" class="btn btn--primary" type="button">🗺 Маршрут</button>
+        </div>
+        <ul id="list" class="list"></ul>
+      </section>
+    </main>
+
+    <dialog id="routeDlg" class="dlg">
+      <form method="dialog">
+        <h2 class="dlg__title">Маршрут</h2>
+        <p id="routeInfo" class="dlg__text"></p>
+        <label class="dlg__check"><input id="routeFromMe" type="checkbox"> Начать от моего местоположения</label>
+        <div id="routeLinks" class="dlg__links"></div>
+        <button class="btn" value="close">Закрыть</button>
+      </form>
+    </dialog>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+/* Тема берётся из Telegram (--tg-theme-*), вне Telegram работают запасные значения и prefers-color-scheme. */
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f1f3f5);
+  --fg: var(--tg-theme-text-color, #1b1f23);
+  --hint: var(--tg-theme-hint-color, #6b7280);
+  --link: var(--tg-theme-link-color, #1a73e8);
+  --accent: var(--tg-theme-button-color, #2e7d32);
+  --accent-fg: var(--tg-theme-button-text-color, #ffffff);
+  --line: color-mix(in srgb, var(--fg) 14%, transparent);
+  --radius: 14px;
+  --sheet-h: 46vh;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([style*="--tg-theme-bg-color"]) {
+    --bg: #17191c; --bg2: #0f1113; --fg: #e8eaed; --hint: #9aa0a6; --link: #8ab4f8; --accent: #4caf50; --accent-fg: #0b1a0c;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg2); color: var(--fg); overscroll-behavior: none;
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+#app { display: flex; flex-direction: column; height: 100dvh; }
+
+/* --- верх --- */
+.top { background: var(--bg); padding: 8px 12px 6px; border-bottom: 1px solid var(--line); }
+.top__row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.top__title { margin: 0; font-size: 16px; font-weight: 700; white-space: nowrap; }
+.datepick { display: flex; align-items: center; gap: 4px; }
+.datepick input {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; min-width: 0; width: 9.5em;
+}
+.datepick { flex: 0 0 auto; }
+.icon-btn {
+  width: 32px; height: 32px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg2); font-size: 18px; line-height: 1;
+}
+.days { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 4px; scrollbar-width: none; }
+.days::-webkit-scrollbar { display: none; }
+.day {
+  flex: 0 0 auto; min-width: 52px; padding: 5px 6px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg2); text-align: center; position: relative;
+}
+.day__wd { display: block; font-size: 11px; color: var(--hint); text-transform: uppercase; }
+.day__num { display: block; font-size: 17px; font-weight: 700; }
+.day__cnt { display: block; font-size: 11px; color: var(--hint); }
+.day[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.day[aria-pressed="true"] .day__wd, .day[aria-pressed="true"] .day__cnt { color: inherit; opacity: .85; }
+
+.banner { padding: 8px 12px; background: #fff3cd; color: #5c4400; font-size: 13px; }
+.banner button { margin-left: 8px; }
+.banner--error { background: #fde7e9; color: #7a1c24; }
+
+/* --- карта + шторка --- */
+.main { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#map { flex: 1; min-height: 120px; background: var(--bg2); z-index: 0; }
+.leaflet-container { font: inherit; }
+
+.sheet {
+  background: var(--bg); border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -4px 16px rgba(0,0,0,.14);
+  height: var(--sheet-h); display: flex; flex-direction: column; z-index: 1; transition: height .2s ease;
+  padding-bottom: var(--safe-b);
+}
+.sheet[data-collapsed="true"] { height: 64px; }
+.sheet[data-collapsed="true"] .sheet__tools, .sheet[data-collapsed="true"] .list { display: none; }
+.sheet__head {
+  all: unset; box-sizing: border-box; display: block; padding: 8px 14px 6px; cursor: pointer; text-align: left;
+}
+.sheet__grip { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 6px; }
+.sheet__title { display: block; font-weight: 700; }
+.sheet__sub { display: block; font-size: 12px; color: var(--hint); }
+.sheet__tools { display: flex; gap: 6px; padding: 4px 12px 8px; }
+.sheet__tools input {
+  flex: 1; min-width: 0; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px;
+}
+.btn { border: 1px solid var(--line); background: var(--bg2); border-radius: 10px; padding: 7px 10px; white-space: nowrap; }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn--primary[hidden] { display: none; }
+
+.list { list-style: none; margin: 0; padding: 0 0 8px; overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; }
+.row {
+  all: unset; box-sizing: border-box; display: block; width: 100%; padding: 9px 14px; cursor: pointer; border-top: 1px solid var(--line);
+}
+.row:hover, .row[aria-current="true"] { background: var(--bg2); }
+.row__name { font-weight: 600; }
+.row__meta { display: block; font-size: 12px; color: var(--hint); }
+.row__tag { color: #b26a00; }
+.empty { padding: 18px 14px; color: var(--hint); }
+
+/* --- диалог маршрута --- */
+.dlg { border: 0; border-radius: var(--radius); background: var(--bg); color: var(--fg); width: min(92vw, 420px); padding: 16px; }
+.dlg::backdrop { background: rgba(0,0,0,.45); }
+.dlg__title { margin: 0 0 6px; font-size: 18px; }
+.dlg__text { margin: 0 0 10px; color: var(--hint); font-size: 13px; }
+.dlg__check { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.dlg__links { display: grid; gap: 8px; margin-bottom: 12px; }
+.dlg__links a {
+  display: block; text-align: center; text-decoration: none; padding: 10px; border-radius: 10px;
+  background: var(--accent); color: var(--accent-fg); font-weight: 600;
+}
+
+/* маркеры/попапы Leaflet */
+.popup__name { font-weight: 700; margin-bottom: 2px; }
+.popup__houses { color: #555; font-size: 12px; margin-bottom: 6px; }
+.popup a.gm {
+  display: inline-block; padding: 6px 10px; border-radius: 8px; background: #1a73e8; color: #fff !important; text-decoration: none; font-weight: 600;
+}
