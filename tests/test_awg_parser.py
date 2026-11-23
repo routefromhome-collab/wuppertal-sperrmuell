@@ -79,3 +79,16 @@ def test_fetch_street_via_similar_list():
 def test_fetch_street_not_found_and_unrecognized():
     assert FakeClient({"POST": read("similar_streets.html")}).fetch_street("Gibtesnicht").status == "not_found"
     assert FakeClient({"POST": read("unknown.html")}).fetch_street("X").status == "unrecognized"
+
+
+def test_debug_dump_saves_unrecognized_and_limits_samples(tmp_path):
+    bad = FakeClient({"POST": read("unknown.html")})
+    bad.debug_dir = str(tmp_path)
+    bad.fetch_street("Achenbachtreppe")
+    assert (tmp_path / "unknown__Achenbachtreppe.html").exists()
+
+    good = FakeClient({"POST": read("calendar_street.html")})
+    good.debug_dir = str(tmp_path)
+    for i in range(6):
+        good.fetch_street(f"S{i}")
+    assert len(list(tmp_path.glob("calendar__*.html"))) == 3  # не больше 3 образцов
