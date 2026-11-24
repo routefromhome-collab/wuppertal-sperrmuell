@@ -35,11 +35,9 @@ def build_day_message(day: date, stops: list[Stop], coords: dict, miniapp_url: s
 
     lines = [f"🗑 <b>Шпера {title}:</b>\n"]
     for stop in stops:
-        label = html.escape(stop.name)
-        if stop.houses:
-            label += " " + html.escape(", ".join(stop.houses))
+        # как в рабочем main.py: только название улицы (номера домов в пост не выводятся)
         q = quote(f"{stop.name}, {CITY}", safe="")
-        lines.append(f'{label} <a href="https://www.google.com/maps/search/?api=1&query={q}">map</a>')
+        lines.append(f'{html.escape(stop.name)} <a href="https://www.google.com/maps/search/?api=1&query={q}">map</a>')
 
     # маршрут: точки с координатами по TSP, остальные в конец по алфавиту
     with_xy = [s for s in stops if s.name in coords]

@@ -1,0 +1,24 @@
+name = "sperrmuell-admin"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Публичные настройки. Замените на свои значения.
+[vars]
+# откуда Worker берёт расписание (GitHub Pages, каталог web/data)
+DATA_BASE_URL = "https://routefromhome-collab.github.io/wuppertal-sperrmuell/data"
+# источник страницы приложения (без пути и без слеша в конце): единственный разрешённый CORS-источник
+ALLOWED_ORIGIN = "https://routefromhome-collab.github.io"
+# ссылка на Mini App для строки «Полная карта» в посте, например https://t.me/<бот>/<приложение>
+MINIAPP_URL = ""
+
+# Секреты задаются командой `npx wrangler secret put <ИМЯ>`, в репозиторий они не попадают:
+#   BOT_TOKEN       токен бота (бот должен быть админом канала с правом публикации)
+#   CHANNEL_ID      @schwebezeit или числовой id канала
+#   ADMIN_IDS       Telegram ID админов через запятую (узнать свой ID: @userinfobot)
+#   ADMIN_CHAT_ID   (необязательно) чат для уведомлений «кто что опубликовал»
+
+# (необязательно) KV для защиты от двойной отправки:
+#   npx wrangler kv namespace create STATE   и вставьте id ниже
+# [[kv_namespaces]]
+# binding = "STATE"
+# id = "<id>"

@@ -113,3 +113,28 @@ button { cursor: pointer; }
 .popup a.gm {
   display: inline-block; padding: 6px 10px; border-radius: 8px; background: #1a73e8; color: #fff !important; text-decoration: none; font-weight: 600;
 }
+
+/* --- баннер канала --- */
+.promo {
+  position: absolute; top: 8px; left: 8px; z-index: 500; max-width: min(250px, 62vw);
+  background: var(--bg); color: var(--fg); text-decoration: none; border-radius: 12px; padding: 7px 10px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.18); font-size: 12px; line-height: 1.25;
+}
+.promo strong { display: block; font-size: 12.5px; }
+.promo span { color: var(--hint); }
+.icon-btn--sm { width: 28px; height: 28px; font-size: 14px; margin-left: 6px; vertical-align: middle; }
+.icon-btn[hidden] { display: none; }
+
+/* --- админ-панель --- */
+.dlg--wide { width: min(94vw, 480px); max-height: 88dvh; flex-direction: column; }
+.dlg--wide[open] { display: flex; }
+.dlg__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dlg__row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.adm { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 80px; }
+.adm__item { border-top: 1px solid var(--line); padding: 8px 0; }
+.adm__line { display: flex; align-items: center; gap: 8px; }
+.adm__line label { flex: 1; display: flex; gap: 8px; align-items: center; }
+.adm__status { font-size: 13px; white-space: nowrap; }
+.adm__warn { color: #b26a00; font-size: 12px; margin: 4px 0 0 26px; }
+.adm details { margin: 4px 0 0 26px; font-size: 12px; color: var(--hint); }
+.adm pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; font: inherit; color: var(--fg); max-height: 160px; overflow: auto; }

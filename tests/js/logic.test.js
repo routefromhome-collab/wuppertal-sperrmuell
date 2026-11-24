@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { addDays, isValidIso, pickupToPutOut, putOutToPickup, todayBerlin, window7 } from "../../web/js/dates.js";
-import { isStale, lastPickupDate, naturalCompare, streetsForPutOut } from "../../web/js/schedule.js";
+import { isStale, lastPickupDate, maxPickupDate, naturalCompare, streetsForPutOut } from "../../web/js/schedule.js";
 import { GOOGLE_CHUNK, googleRouteLinks, orderPoints, planRoute } from "../../web/js/routing.js";
 
 test("правило D-1: вывоз AWG 14-го -> выставить 13-го", () => {
@@ -43,6 +43,9 @@ test("выборка улиц применяет сдвиг и сортируе�
 test("покрытие данных и устаревание", () => {
   assert.equal(lastPickupDate(SCHEDULE), "2026-12-14");
   assert.equal(lastPickupDate({ streets: {} }), null);
+  // граница публикации из парсера важнее последней даты вывоза
+  assert.equal(lastPickupDate({ ...SCHEDULE, covered_until: "2027-04-30" }), "2027-04-30");
+  assert.equal(maxPickupDate(SCHEDULE), "2026-12-14");
   assert.ok(isStale(SCHEDULE, Date.parse("2026-12-30T00:00:00Z")));
   assert.ok(!isStale(SCHEDULE, Date.parse("2026-11-20T00:00:00Z")));
   assert.ok(naturalCompare("9", "10") < 0 && naturalCompare("12a", "12b") < 0);
@@ -73,4 +76,17 @@ test("planRoute: улицы без координат уходят в конец
   assert.deepEqual(r.names, ["A", "B", "Z"]);
   const url = decodeURIComponent(r.links[0].url);
   assert.ok(url.includes("/dir/51,6.9/A, Wuppertal/B, Wuppertal/Z, Wuppertal/"));
+});
+
+import { stopPoints } from "../../web/js/schedule.js";
+
+test("stopPoints: улица целиком, дома с координатами, дома без координат", () => {
+  const coords = { Bachstr: [51.2, 7.1], "Alter Markt": [51.3, 7.2], "Alter Markt 5": [51.31, 7.21] };
+  assert.deepEqual(stopPoints({ name: "Bachstr", houses: [] }, coords), [{ ll: [51.2, 7.1], label: "Bachstr", houses: [] }]);
+  assert.deepEqual(stopPoints({ name: "Alter Markt", houses: ["5", "7"] }, coords), [
+    { ll: [51.31, 7.21], label: "Alter Markt 5", houses: ["5"] },
+    { ll: [51.3, 7.2], label: "Alter Markt", houses: ["7"] }, // дом без координат: точка улицы
+  ]);
+  assert.deepEqual(stopPoints({ name: "Нет", houses: [] }, coords), []);
+  assert.deepEqual(stopPoints({ name: "Alter Markt", houses: ["7"] }, { "Alter Markt": [1, 2] }), [{ ll: [1, 2], label: "Alter Markt", houses: ["7"] }]);
 });

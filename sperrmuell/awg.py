@@ -159,11 +159,15 @@ def classify_page(html: str) -> PageKind:
 
 def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
     """[(текст ссылки, абсолютный URL)] для ссылок выбора дома / похожей улицы."""
-    out = []
+    out, seen = [], set()
     for a in _soup(html).select('a[href*="streetname"]'):
         text = a.get_text(strip=True)
-        if text and a.get("href"):
-            out.append((text, urljoin(base_url, a["href"])))
+        if not text or not a.get("href"):
+            continue
+        link = urljoin(base_url, a["href"])
+        if link not in seen:  # как в старом main.py: повторы ссылок отбрасываем
+            seen.add(link)
+            out.append((text, link))
     return out
 
 

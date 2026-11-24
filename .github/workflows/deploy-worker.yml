@@ -1,0 +1,35 @@
+name: Deploy Worker
+
+# Публикует Cloudflare Worker (админ-публикация в канал из Mini App).
+# Worker импортирует общий код из web/js, поэтому деплоится и при его изменении.
+# Нужны secrets репозитория: CLOUDFLARE_API_TOKEN (шаблон «Edit Cloudflare Workers») и CLOUDFLARE_ACCOUNT_ID.
+# Секреты самого Worker (BOT_TOKEN, CHANNEL_ID, ADMIN_IDS) задаются один раз вручную: npx wrangler secret put <ИМЯ>
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**", "web/js/**", ".github/workflows/deploy-worker.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy

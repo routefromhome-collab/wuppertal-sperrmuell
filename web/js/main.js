@@ -2,9 +2,11 @@
 import {
   addDays, formatDayNumber, formatLong, formatWeekdayShort, isValidIso, putOutToPickup, todayBerlin, window7,
 } from "./dates.js";
-import { isStale, lastPickupDate, streetsForPutOut } from "./schedule.js";
+import { isStale, lastPickupDate, stopPoints, streetsForPutOut } from "./schedule.js";
 import { haversineKm, planRoute } from "./routing.js";
-import { haptic, initTelegram, openExternal, setMainButton, startParam } from "./tg.js";
+import { haptic, initTelegram, openChannel, openExternal, setMainButton, startParam } from "./tg.js";
+import { CHANNEL_URL } from "../config.js";
+import { detectAdmin, openAdmin } from "./admin.js";
 
 const CITY = "Wuppertal";
 const CITY_CENTER = [51.2562, 7.1508];
@@ -117,13 +119,15 @@ function renderMap(stops, { fit }) {
   streetLayer.clearLayers();
   const points = [];
   for (const stop of stops) {
-    const ll = state.coords[stop.name];
-    if (!ll) continue;
-    const m = L.circleMarker(ll, { radius: 8, color: "#fff", weight: 2, fillColor: accent, fillOpacity: 0.95 });
-    m.bindPopup(() => popupNode(stop, ll), { maxWidth: 260 });
-    m.addTo(streetLayer);
-    state.markers.set(stop.name, m);
-    points.push(ll);
+    // улица целиком: одна точка; улица с отдельными календарями домов: точки по домам (как в старой карте)
+    const markers = stopPoints(stop, state.coords).map((p) => {
+      const m = L.circleMarker(p.ll, { radius: 8, color: "#fff", weight: 2, fillColor: accent, fillOpacity: 0.95 });
+      m.bindPopup(() => popupNode({ name: p.label, houses: p.houses.length && p.label === stop.name ? p.houses : [] }, p.ll), { maxWidth: 260 });
+      m.addTo(streetLayer);
+      points.push(p.ll);
+      return m;
+    });
+    if (markers.length) state.markers.set(stop.name, markers);
   }
   if (fit && points.length) map.fitBounds(points, { padding: [32, 32], maxZoom: 15 });
   else if (fit) map.setView(CITY_CENTER, 12);
@@ -205,7 +209,7 @@ function renderList(stops) {
     const district = state.districts.get(stop.name);
     if (district) meta.push(district);
     if (meta.length) row.append(el("span", "row__meta", meta.join(" · ")));
-    if (!state.coords[stop.name]) row.append(el("span", "row__meta row__tag", "нет точки на карте"));
+    if (!stopPoints(stop, state.coords).length) row.append(el("span", "row__meta row__tag", "нет точки на карте"));
     row.addEventListener("click", () => focusStreet(stop));
     li.append(row);
     list.append(li);
@@ -246,18 +250,22 @@ function setCollapsed(collapsed) {
 
 function focusStreet(stop) {
   state.active = stop.name;
-  const marker = state.markers.get(stop.name);
+  const markers = state.markers.get(stop.name) ?? [];
   document.querySelectorAll(".row").forEach((r) => {
     if (r.dataset.name === stop.name) r.setAttribute("aria-current", "true");
     else r.removeAttribute("aria-current");
   });
-  if (!marker || !hasMap) {
+  if (!markers.length || !hasMap) {
     flash("Для этой улицы пока нет точки на карте.");
     return;
   }
   setCollapsed(true);
-  map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 16), { duration: 0.6 });
-  marker.openPopup();
+  if (markers.length === 1) {
+    map.flyTo(markers[0].getLatLng(), Math.max(map.getZoom(), 16), { duration: 0.6 });
+    markers[0].openPopup();
+  } else {
+    map.flyToBounds(markers.map((m) => m.getLatLng()), { padding: [40, 40], maxZoom: 17, duration: 0.6 });
+  }
 }
 
 function locate() {
@@ -280,13 +288,13 @@ async function showNearest() {
     return;
   }
   state.userPos = pos;
-  const candidates = (currentDay()?.stops ?? []).filter((s) => state.coords[s.name]);
+  const candidates = (currentDay()?.stops ?? []).filter((s) => stopPoints(s, state.coords).length);
   if (!candidates.length) {
     flash("На выбранный день нет улиц с точками на карте.");
     return;
   }
   const best = candidates
-    .map((s) => ({ s, km: haversineKm(pos, state.coords[s.name]) }))
+    .map((s) => ({ s, km: Math.min(...stopPoints(s, state.coords).map((p) => haversineKm(pos, p.ll))) }))
     .reduce((a, b) => (b.km < a.km ? b : a));
   const meters = Math.round(best.km * 1000);
   const minutes = Math.max(1, Math.round((best.km / 5) * 60));
@@ -364,6 +372,13 @@ async function init() {
   }
 }
 
+async function setupAdmin() {
+  if (await detectAdmin()) {
+    $("adminBtn").hidden = false;
+    $("adminBtn").addEventListener("click", () => openAdmin({ start: state.start, days: 7 }));
+  }
+}
+
 function bindUi() {
   $("date").value = state.start;
   $("date").addEventListener("change", (e) => setStart(e.target.value));
@@ -375,6 +390,10 @@ function bindUi() {
   });
   $("sheetToggle").addEventListener("click", () => setCollapsed($("sheet").dataset.collapsed !== "true"));
   $("nearest").addEventListener("click", showNearest);
+  $("promo").addEventListener("click", (e) => {
+    e.preventDefault();
+    openChannel(CHANNEL_URL);
+  });
   $("routeBtn").addEventListener("click", openRoute);
   $("routeFromMe").addEventListener("change", async (e) => {
     if (e.target.checked && !state.userPos) {
@@ -396,3 +415,4 @@ if (sp && isValidIso(sp)) state.start = sp;
 bindUi();
 initMap();
 init();
+setupAdmin();

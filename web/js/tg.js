@@ -22,6 +22,22 @@ export function startParam() {
   return tg?.initDataUnsafe?.start_param ?? new URLSearchParams(location.search).get("startapp");
 }
 
+export const initData = () => tg?.initData ?? "";
+
+/** Подтверждение: нативное окно Telegram (6.2+) или window.confirm вне Telegram. */
+export function confirmDialog(message) {
+  return new Promise((resolve) => {
+    if (atLeast("6.2") && tg.showConfirm) tg.showConfirm(message, (ok) => resolve(Boolean(ok)));
+    else resolve(window.confirm(message));
+  });
+}
+
+/** Ссылки t.me открываем средствами Telegram, остальные во внешнем браузере. */
+export function openChannel(url) {
+  if (tg?.openTelegramLink) tg.openTelegramLink(url);
+  else openExternal(url);
+}
+
 export function openExternal(url) {
   if (tg?.openLink) tg.openLink(url);
   else window.open(url, "_blank", "noopener");

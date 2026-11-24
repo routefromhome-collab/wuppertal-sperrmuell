@@ -47,6 +47,6 @@ def test_message_formats():
     day = date(2026, 11, 29)
     text = build_day_message(day, [Stop("Bachstr"), Stop("Adolf & Co", ("1", "2"))], coords, "https://t.me/bot/app")
     assert "🗑 <b>Шпера 29 November 2026:</b>" in text
-    assert "Adolf &amp; Co 1, 2" in text  # экранирование HTML
+    assert "Adolf &amp; Co <a" in text and "Co 1, 2" not in text  # экранирование HTML, дома в пост не идут
     assert "startapp=2026-11-29" in text and text.rstrip().endswith("#шпера")
     assert build_day_message(day, [], coords, None).startswith("✅ 29 November 2026 выходной.")

@@ -40,3 +40,14 @@ const asDate = (iso) => new Date(`${iso}T00:00:00Z`);
 export const formatWeekdayShort = (iso) => fmt({ weekday: "short" }).format(asDate(iso));
 export const formatDayNumber = (iso) => String(Number(iso.slice(8, 10)));
 export const formatLong = (iso) => fmt({ weekday: "short", day: "numeric", month: "long" }).format(asDate(iso));
+
+export const MONTHS_DE = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+/** 29 November 2026: формат дат в постах канала (как в рабочем main.py). */
+export function formatDe(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${MONTHS_DE[m - 1]} ${y}`;
+}

@@ -13,7 +13,7 @@
   <div id="app">
     <header class="top">
       <div class="top__row">
-        <h1 class="top__title">🗑 Шпера</h1>
+        <h1 class="top__title">🗑 Шпера <button id="adminBtn" class="icon-btn icon-btn--sm" type="button" hidden aria-label="Публикация в канал" title="Публикация в канал">📣</button></h1>
         <div class="datepick">
           <button id="prev" class="icon-btn" type="button" aria-label="Сдвинуть на день назад">‹</button>
           <input id="date" type="date" aria-label="Первый день списка">
@@ -27,6 +27,10 @@
 
     <main class="main">
       <div id="map" aria-label="Карта улиц"></div>
+      <a id="promo" class="promo" href="https://t.me/schwebezeit">
+        <strong>⚡ Карта предоставлена телеграм каналом Schwebezeit</strong>
+        <span>Нажми, перейди и подпишись</span>
+      </a>
 
       <section id="sheet" class="sheet" aria-label="Список улиц">
         <button id="sheetToggle" class="sheet__head" type="button" aria-expanded="true" aria-controls="list">
@@ -42,6 +46,20 @@
         <ul id="list" class="list"></ul>
       </section>
     </main>
+
+    <dialog id="adminDlg" class="dlg dlg--wide">
+      <div class="dlg__head">
+        <h2 class="dlg__title">📣 Публикация в канал</h2>
+        <button id="adminClose" class="icon-btn" type="button" aria-label="Закрыть">✕</button>
+      </div>
+      <p id="adminHint" class="dlg__text"></p>
+      <ul id="adminList" class="adm"></ul>
+      <p id="adminStatus" class="dlg__text" role="status"></p>
+      <div class="dlg__row">
+        <button id="adminReload" class="btn" type="button">Обновить</button>
+        <button id="adminSend" class="btn btn--primary" type="button">Отправить в канал</button>
+      </div>
+    </dialog>
 
     <dialog id="routeDlg" class="dlg">
       <form method="dialog">

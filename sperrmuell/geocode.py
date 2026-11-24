@@ -119,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="web/data/coords.json")
     p.add_argument("--failed", default="data/geocode_failed.json")
     p.add_argument("--seed", help="старый geocode_cache.json")
+    p.add_argument("--schedule", default="web/data/schedule.json", help="откуда брать дома с отдельными календарями")
+    p.add_argument("--house-seed", default="data/source/house_coords_seed.json")
     p.add_argument("--limit", type=int)
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -132,6 +134,23 @@ def main(argv: list[str] | None = None) -> int:
         for k, v in seed_from_cache(Path(args.seed), streets).items():
             coords.setdefault(k, v)
         log.info("После seed: %d координат", len(coords))
+
+    # дома с отдельными календарями: ключ "Улица 12a". Берём из сида (старый кэш), без сети;
+    # для домов без координат приложение рисует точку улицы.
+    house_seed = load_json(Path(args.house_seed), {})
+    schedule = load_json(Path(args.schedule), {"streets": {}})
+    wanted = {
+        f"{name} {h}"
+        for name, entry in schedule.get("streets", {}).items()
+        for h in (entry.get("houses") or {})
+    }
+    added = 0
+    for key in wanted:
+        if key not in coords and key in house_seed:
+            coords[key] = house_seed[key]
+            added += 1
+    log.info("Дома: нужно %d, из сида добавлено %d, без точки (будет точка улицы) %d",
+             len(wanted), added, sum(1 for k in wanted if k not in coords))
 
     now = datetime.now(timezone.utc)
     todo = []
