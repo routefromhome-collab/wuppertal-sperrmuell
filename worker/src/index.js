@@ -2,7 +2,9 @@
 //
 //   POST /api/me       {initData}                          -> {ok, admin}
 //   POST /api/preview  {initData, start, days}             -> {ok, days:[{date, count, canPublish, warnings, messages}]}
-//   POST /api/publish  {initData, date, requestId}         -> {ok, sent}   (один день за запрос)
+//   POST /api/publish  {initData, date, requestId, test?}  -> {ok, sent}   (один день за запрос; test=true: в ADMIN_CHAT_ID, не в канал)
+//   POST /api/status   {initData}                          -> {ok, schedule, run, canUpdate}   (возраст данных, последний запуск Update schedule)
+//   POST /api/update   {initData, force?, quick?}          -> {ok}         (запускает workflow Update schedule в GitHub)
 //
 // Проверяется подпись Telegram (initData), свежесть и ID пользователя из ADMIN_IDS. Токен бота живёт
 // только в секретах Worker. Логика дат (D-1), выборки улиц и маршрутов общая с приложением: web/js.
@@ -74,10 +76,88 @@ async function authenticate(request, env, body, deps, maxAgeSec) {
   return { user: v.user };
 }
 
+// ---------- запуск обновления расписания (GitHub Actions) ----------
+const WORKFLOW = "update-schedule.yml";
+const ACTIVE_RUN = new Set(["queued", "in_progress", "waiting", "requested", "pending"]);
+const canUpdate = (env) => Boolean(env.GH_TOKEN && env.GITHUB_REPO);
+
+function github(env, deps, path, init = {}) {
+  return deps.fetch(`https://api.github.com/repos/${env.GITHUB_REPO}${path}`, {
+    ...init,
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${env.GH_TOKEN}`,
+      "x-github-api-version": "2022-11-28",
+      "user-agent": "sperrmuell-admin-worker",
+      ...(init.headers ?? {}),
+    },
+  });
+}
+
+function githubError(res, data) {
+  if (res.status === 401 || res.status === 403) return "GitHub отклонил токен: проверьте GH_TOKEN (нужно право Actions: Read and write на этот репозиторий).";
+  if (res.status === 404) return "GitHub: репозиторий или workflow не найден (проверьте GITHUB_REPO и права токена).";
+  return `GitHub: ${String(data?.message ?? res.status)}`;
+}
+
+async function latestRun(env, deps) {
+  const res = await github(env, deps, `/actions/workflows/${WORKFLOW}/runs?per_page=1`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { error: githubError(res, data) };
+  const r = data.workflow_runs?.[0];
+  if (!r) return { run: null };
+  return { run: { status: r.status, conclusion: r.conclusion, created_at: r.created_at, updated_at: r.updated_at, html_url: r.html_url, event: r.event } };
+}
+
+async function status(request, env, deps) {
+  let schedule = null;
+  try {
+    const base = String(env.DATA_BASE_URL ?? "").replace(/\/$/, "");
+    const r = await deps.fetch(`${base}/schedule.json`, { cf: { cacheTtl: 30, cacheEverything: true } });
+    if (r.ok) {
+      const s = await r.json();
+      const streets = Object.values(s.streets ?? {});
+      schedule = { generated_at: s.generated_at ?? null, covered_until: s.covered_until ?? null, streets: streets.length, with_data: streets.filter((e) => e.dates?.length || Object.keys(e.houses ?? {}).length).length };
+    }
+  } catch {
+    /* данные недоступны: покажем null */
+  }
+  const out = { ok: true, schedule, canUpdate: canUpdate(env), run: null };
+  if (canUpdate(env)) {
+    const l = await latestRun(env, deps);
+    if (l.error) out.runError = l.error;
+    else out.run = l.run;
+  }
+  return json(request, env, 200, out);
+}
+
+async function update(request, env, deps, body, user) {
+  if (!canUpdate(env)) return fail(request, env, 501, "not_configured", "Запуск обновления не настроен: задайте секрет GH_TOKEN и переменную GITHUB_REPO в Worker.");
+  const force = body.force === true;
+  const limit = body.quick === true ? 20 : null; // пробный прогон: только 20 улиц
+
+  const l = await latestRun(env, deps);
+  if (l.error) return fail(request, env, 502, "github_error", l.error);
+  if (l.run && ACTIVE_RUN.has(l.run.status)) return fail(request, env, 409, "already_running", "Обновление уже идёт. Дождитесь завершения.");
+
+  const res = await github(env, deps, `/actions/workflows/${WORKFLOW}/dispatches`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { force: String(force), limit: limit ? String(limit) : "" } }),
+  });
+  if (res.status !== 204) {
+    const data = await res.json().catch(() => ({}));
+    console.error("github dispatch failed", res.status, data?.message);
+    return fail(request, env, 502, "github_error", githubError(res, data));
+  }
+  console.log("update dispatched by", user.id, { force, limit });
+  return json(request, env, 200, { ok: true, force, limit });
+}
+
 export async function handle(request, env, deps) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-  if (request.method !== "POST" || !["/api/me", "/api/preview", "/api/publish"].includes(url.pathname)) {
+  if (request.method !== "POST" || !["/api/me", "/api/preview", "/api/publish", "/api/status", "/api/update"].includes(url.pathname)) {
     return fail(request, env, 404, "not_found", "Не найдено.");
   }
   // Только запросы со страницы приложения (CORS защищает браузер; здесь отсекаем чужие источники явно).
@@ -98,8 +178,11 @@ export async function handle(request, env, deps) {
   if (auth.error) return auth.error;
   const admin = isAdmin(env, auth.user);
 
-  if (url.pathname === "/api/me") return json(request, env, 200, { ok: true, admin });
+  if (url.pathname === "/api/me") return json(request, env, 200, { ok: true, admin, canUpdate: admin && canUpdate(env) });
   if (!admin) return fail(request, env, 403, "forbidden", "Нет прав администратора.");
+
+  if (url.pathname === "/api/status") return status(request, env, deps);
+  if (url.pathname === "/api/update") return update(request, env, deps, body, auth.user);
 
   let data;
   try {
@@ -118,22 +201,27 @@ export async function handle(request, env, deps) {
     return json(request, env, 200, { ok: true, days: out });
   }
 
-  // --- publish: ровно один день ---
+  // --- publish: ровно один день. test=true: отправка в ADMIN_CHAT_ID, канал не затрагивается ---
   if (!isValidIso(body.date)) return fail(request, env, 400, "bad_request", "Некорректная дата.");
   if (!UUID.test(String(body.requestId ?? ""))) return fail(request, env, 400, "bad_request", "Нужен requestId.");
-  if (!env.CHANNEL_ID || !env.BOT_TOKEN) return fail(request, env, 500, "misconfigured", "Не настроены CHANNEL_ID / BOT_TOKEN.");
+  const test = body.test === true;
+  const target = test ? env.ADMIN_CHAT_ID : env.CHANNEL_ID;
+  if (!target || !env.BOT_TOKEN) {
+    return fail(request, env, 500, "misconfigured", test ? "Для тестовой отправки не настроен ADMIN_CHAT_ID." : "Не настроены CHANNEL_ID / BOT_TOKEN.");
+  }
 
   const day = describeDay(body.date, data, env, deps.now());
-  if (!day.canPublish) return fail(request, env, 409, "no_data", day.warnings[0]);
+  if (!test && !day.canPublish) return fail(request, env, 409, "no_data", day.warnings[0]);
 
-  // Защита от двойного нажатия и повторов сети: тот же requestId+день не отправляется дважды.
+  // Защита от двойного нажатия и повторов сети: тот же requestId+день не отправляется в канал дважды.
   const doneKey = `done:${body.requestId}:${body.date}`;
-  if (env.STATE && (await env.STATE.get(doneKey))) return json(request, env, 200, { ok: true, duplicate: true, sent: 0 });
+  if (!test && env.STATE && (await env.STATE.get(doneKey))) return json(request, env, 200, { ok: true, duplicate: true, sent: 0 });
 
   const chunks = chunkText(day.text);
+  if (test) chunks[0] = `🧪 ТЕСТ: в канал это не отправлялось\n\n${chunks[0]}`;
   let sent = 0;
   for (const chunk of chunks) {
-    const r = await sendMessage(deps.fetch, env.BOT_TOKEN, env.CHANNEL_ID, chunk);
+    const r = await sendMessage(deps.fetch, env.BOT_TOKEN, target, chunk);
     if (!r.ok) {
       console.error("telegram send failed", r.status, r.description, "chunk", sent + 1, "of", chunks.length);
       return json(request, env, 502, { ok: false, error: "telegram_error", message: `Telegram: ${r.description}. Отправлено частей: ${sent} из ${chunks.length}.`, sent, total: chunks.length });
@@ -141,13 +229,13 @@ export async function handle(request, env, deps) {
     sent++;
     if (sent < chunks.length) await deps.sleep(300);
   }
-  if (env.STATE) await env.STATE.put(doneKey, String(deps.now()), { expirationTtl: 3600 });
+  if (!test && env.STATE) await env.STATE.put(doneKey, String(deps.now()), { expirationTtl: 3600 });
 
-  if (env.ADMIN_CHAT_ID) {
+  if (!test && env.ADMIN_CHAT_ID) {
     const who = auth.user.username ? `@${auth.user.username}` : String(auth.user.id);
     await sendMessage(deps.fetch, env.BOT_TOKEN, env.ADMIN_CHAT_ID, `📣 Опубликовано ${body.date} (${day.count} ул.), отправил ${who}`, { html: false });
   }
-  return json(request, env, 200, { ok: true, sent, total: chunks.length, count: day.count });
+  return json(request, env, 200, { ok: true, sent, total: chunks.length, count: day.count, test });
 }
 
 export default {

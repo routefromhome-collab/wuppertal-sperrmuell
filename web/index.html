@@ -49,14 +49,26 @@
 
     <dialog id="adminDlg" class="dlg dlg--wide">
       <div class="dlg__head">
-        <h2 class="dlg__title">📣 Публикация в канал</h2>
+        <h2 class="dlg__title">📣 Админ-панель</h2>
         <button id="adminClose" class="icon-btn" type="button" aria-label="Закрыть">✕</button>
       </div>
+      <details id="adminData" class="adm-data">
+        <summary id="adminDataSummary">Данные расписания</summary>
+        <p id="adminDataInfo" class="dlg__text"></p>
+        <p id="adminRunInfo" class="dlg__text" role="status"></p>
+        <div id="adminUpdateBox" hidden>
+          <label class="dlg__check"><input id="adminQuick" type="checkbox"> Пробный прогон: только 20 улиц</label>
+          <label class="dlg__check"><input id="adminForce" type="checkbox"> Перезапросить всё, не глядя на возраст записей</label>
+          <button id="adminUpdate" class="btn" type="button">🔄 Обновить данные AWG</button>
+        </div>
+        <p id="adminUpdateHint" class="dlg__text" hidden>Запуск обновления из приложения не настроен: нужен секрет GH_TOKEN в Worker (см. README). Пока запускайте Actions → Update schedule.</p>
+      </details>
       <p id="adminHint" class="dlg__text"></p>
       <ul id="adminList" class="adm"></ul>
       <p id="adminStatus" class="dlg__text" role="status"></p>
       <div class="dlg__row">
-        <button id="adminReload" class="btn" type="button">Обновить</button>
+        <button id="adminReload" class="btn" type="button">Обновить список</button>
+        <button id="adminTest" class="btn" type="button">🧪 Тест себе</button>
         <button id="adminSend" class="btn btn--primary" type="button">Отправить в канал</button>
       </div>
     </dialog>

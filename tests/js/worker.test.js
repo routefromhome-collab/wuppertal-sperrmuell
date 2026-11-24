@@ -57,10 +57,16 @@ function makeEnv(extra = {}) {
   return { BOT_TOKEN: TOKEN, CHANNEL_ID: "@chan", ADMIN_IDS: "111", ALLOWED_ORIGIN: ORIGIN, DATA_BASE_URL: "https://data.test/data", MINIAPP_URL: "https://t.me/bot/app", ...extra };
 }
 
-function makeDeps({ tgFail = null } = {}) {
+function makeDeps({ tgFail = null, runs = [], dispatchStatus = 204 } = {}) {
   const sent = [];
+  const gh = [];
   const fetch = async (url, init) => {
     url = String(url);
+    if (url.startsWith("https://api.github.com/")) {
+      gh.push({ url, method: init?.method ?? "GET", headers: init?.headers, body: init?.body ? JSON.parse(init.body) : null });
+      if (url.includes("/runs")) return new Response(JSON.stringify({ workflow_runs: runs }));
+      if (url.endsWith("/dispatches")) return new Response(dispatchStatus === 204 ? null : JSON.stringify({ message: "Not Found" }), { status: dispatchStatus });
+    }
     if (url.endsWith("/schedule.json")) return new Response(JSON.stringify(SCHEDULE));
     if (url.endsWith("/coords.json")) return new Response(JSON.stringify(COORDS));
     if (url.startsWith("https://api.telegram.org/")) {
@@ -71,7 +77,7 @@ function makeDeps({ tgFail = null } = {}) {
     }
     return new Response("nope", { status: 404 });
   };
-  return { deps: { fetch, now: () => NOW, sleep: async () => {} }, sent };
+  return { deps: { fetch, now: () => NOW, sleep: async () => {} }, sent, gh };
 }
 
 function call(path, payload, { env = makeEnv(), deps, origin = ORIGIN } = {}) {
@@ -82,8 +88,11 @@ function call(path, payload, { env = makeEnv(), deps, origin = ORIGIN } = {}) {
 const initFor = (user) => signInitData({ user });
 
 test("/api/me: админ и не админ", async () => {
-  assert.deepEqual(await (await call("/api/me", { initData: initFor(ADMIN) })).json(), { ok: true, admin: true });
-  assert.deepEqual(await (await call("/api/me", { initData: initFor(GUEST) })).json(), { ok: true, admin: false });
+  assert.deepEqual(await (await call("/api/me", { initData: initFor(ADMIN) })).json(), { ok: true, admin: true, canUpdate: false });
+  assert.deepEqual(await (await call("/api/me", { initData: initFor(GUEST) })).json(), { ok: true, admin: false, canUpdate: false });
+  const withGh = makeEnv({ GH_TOKEN: "ghp_secret", GITHUB_REPO: "o/r" });
+  assert.equal((await (await call("/api/me", { initData: initFor(ADMIN) }, { env: withGh })).json()).canUpdate, true);
+  assert.equal((await (await call("/api/me", { initData: initFor(GUEST) }, { env: withGh })).json()).canUpdate, false);
 });
 
 test("чужой Origin и неверная подпись отклоняются", async () => {
@@ -175,4 +184,91 @@ test("формат поста совпадает с рабочим main.py", () 
   assert.ok(text.includes("\n🗺 Маршрут (часть 1): <a href=\"https://www.google.com/maps/dir/Bachstr%2C%20Wuppertal/\">map</a>"));
   assert.ok(text.includes("\n📍Полная карта на 29 November 2026: <a href=\"https://t.me/b/a?startapp=2026-11-29\">map</a>"));
   assert.equal(buildDayMessage({ iso: "2026-11-29", stops: [], coords: {} }), "✅ 29 November 2026 выходной.\n\n#шпера");
+});
+
+
+// ---------- тест, статус и запуск обновления ----------
+test("test=true уходит в ADMIN_CHAT_ID, а не в канал, и не помечает день выполненным", async () => {
+  const store = new Map();
+  const env = makeEnv({ ADMIN_CHAT_ID: "999", STATE: { get: async (k) => store.get(k) ?? null, put: async (k, v) => void store.set(k, v) } });
+  const { deps, sent } = makeDeps();
+  const payload = { initData: initFor(ADMIN), date: "2026-11-30", requestId: "req-12345678", test: true };
+  const out = await (await call("/api/publish", payload, { env, deps })).json();
+  assert.ok(out.ok && out.test);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].chat_id, "999");
+  assert.ok(sent[0].text.startsWith("🧪 ТЕСТ"));
+  assert.equal(store.size, 0);
+  // после теста настоящая публикация с тем же requestId проходит и идёт в канал
+  const real = await (await call("/api/publish", { ...payload, test: false }, { env, deps })).json();
+  assert.ok(real.ok && !real.duplicate);
+  assert.equal(sent.at(-2).chat_id, "@chan");
+});
+
+test("test=true без ADMIN_CHAT_ID: отказ, канал не затронут", async () => {
+  const { deps, sent } = makeDeps();
+  const r = await call("/api/publish", { initData: initFor(ADMIN), date: "2026-11-30", requestId: "req-12345678", test: true }, { deps });
+  assert.equal(r.status, 500);
+  assert.equal(sent.length, 0);
+});
+
+test("test разрешён и на дату вне календаря (это только проверка), публикация в канал нет", async () => {
+  const env = makeEnv({ ADMIN_CHAT_ID: "999" });
+  const { deps, sent } = makeDeps();
+  const base = { initData: initFor(ADMIN), date: "2027-06-01", requestId: "req-12345678" };
+  assert.equal((await call("/api/publish", { ...base, test: true }, { env, deps })).status, 200);
+  assert.equal((await call("/api/publish", base, { env, deps })).status, 409);
+  assert.deepEqual(sent.map((m) => m.chat_id), ["999"]);
+});
+
+const GH_ENV = { GH_TOKEN: "ghp_secret", GITHUB_REPO: "o/r", ADMIN_CHAT_ID: "999" };
+
+test("update: запускает workflow с нужными параметрами; токен GitHub не утекает", async () => {
+  const { deps, gh } = makeDeps();
+  const r = await call("/api/update", { initData: initFor(ADMIN), force: true, quick: true }, { env: makeEnv(GH_ENV), deps });
+  const out = await r.json();
+  assert.ok(out.ok && out.limit === 20 && out.force === true);
+  const d = gh.find((c) => c.url.endsWith("/actions/workflows/update-schedule.yml/dispatches"));
+  assert.equal(d.method, "POST");
+  assert.deepEqual(d.body, { ref: "main", inputs: { force: "true", limit: "20" } });
+  assert.equal(d.headers.authorization, "Bearer ghp_secret");
+  assert.ok(!JSON.stringify(out).includes("ghp_secret"));
+  const full = makeDeps();
+  await call("/api/update", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps: full.deps });
+  assert.deepEqual(full.gh.at(-1).body.inputs, { force: "false", limit: "" });
+});
+
+test("update: не админ, нет GH_TOKEN, уже идёт запуск, ошибка GitHub", async () => {
+  const guest = makeDeps();
+  assert.equal((await call("/api/update", { initData: initFor(GUEST) }, { env: makeEnv(GH_ENV), deps: guest.deps })).status, 403);
+  assert.equal(guest.gh.length, 0);
+
+  assert.equal((await call("/api/update", { initData: initFor(ADMIN) })).status, 501);
+
+  const busy = makeDeps({ runs: [{ status: "in_progress", conclusion: null }] });
+  const b = await call("/api/update", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps: busy.deps });
+  assert.equal(b.status, 409);
+  assert.ok(!busy.gh.some((c) => c.url.endsWith("/dispatches")));
+
+  const bad = makeDeps({ dispatchStatus: 404 });
+  const e = await call("/api/update", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps: bad.deps });
+  const out = await e.json();
+  assert.equal(e.status, 502);
+  assert.match(out.message, /не найден/);
+  assert.ok(!JSON.stringify(out).includes("ghp_secret"));
+});
+
+test("status: возраст данных и последний запуск; для не админа закрыт", async () => {
+  const run = { status: "completed", conclusion: "success", created_at: "2026-11-24T10:00:00Z", updated_at: "2026-11-24T10:20:00Z", html_url: "https://github.com/o/r/actions/runs/1", event: "workflow_dispatch" };
+  const { deps } = makeDeps({ runs: [run] });
+  const out = await (await call("/api/status", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps })).json();
+  assert.equal(out.schedule.streets, 3);
+  assert.equal(out.schedule.covered_until, "2027-04-30");
+  assert.equal(out.schedule.with_data, 3);
+  assert.equal(out.run.conclusion, "success");
+  assert.equal(out.canUpdate, true);
+  const noGh = await (await call("/api/status", { initData: initFor(ADMIN) }, { deps: makeDeps().deps })).json();
+  assert.equal(noGh.canUpdate, false);
+  assert.equal(noGh.run, null);
+  assert.equal((await call("/api/status", { initData: initFor(GUEST) }, { env: makeEnv(GH_ENV), deps: makeDeps({ runs: [run] }).deps })).status, 403);
 });

@@ -10,12 +10,16 @@ DATA_BASE_URL = "https://routefromhome-collab.github.io/wuppertal-sperrmuell/dat
 ALLOWED_ORIGIN = "https://routefromhome-collab.github.io"
 # ссылка на Mini App для строки «Полная карта» в посте, например https://t.me/<бот>/<приложение>
 MINIAPP_URL = ""
+# репозиторий, где запускается workflow «Update schedule» из панели админа
+GITHUB_REPO = "routefromhome-collab/wuppertal-sperrmuell"
 
 # Секреты задаются командой `npx wrangler secret put <ИМЯ>`, в репозиторий они не попадают:
 #   BOT_TOKEN       токен бота (бот должен быть админом канала с правом публикации)
 #   CHANNEL_ID      @schwebezeit или числовой id канала
 #   ADMIN_IDS       Telegram ID админов через запятую (узнать свой ID: @userinfobot)
-#   ADMIN_CHAT_ID   (необязательно) чат для уведомлений «кто что опубликовал»
+#   ADMIN_CHAT_ID   чат админа: сюда идёт «Тест» из панели и уведомления «кто что опубликовал»
+#   GH_TOKEN        (необязательно) токен GitHub для кнопки «Обновить данные AWG» в панели:
+#                   fine-grained token только на этот репозиторий, право «Actions: Read and write»
 
 # (необязательно) KV для защиты от двойной отправки:
 #   npx wrangler kv namespace create STATE   и вставьте id ниже

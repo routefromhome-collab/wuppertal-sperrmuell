@@ -1,21 +1,22 @@
-// Админ-панель: публикация списка улиц в канал. Видна только админам (проверяет Worker по подписи Telegram).
-// Сама панель ничего не решает: права и отправку выполняет Worker, здесь только интерфейс.
+// Панель админа: обновление данных AWG, тестовая отправка себе и публикация в канал.
+// Панель только интерфейс: права, отправку и запуск обновления выполняет Worker (проверяет подпись Telegram и ADMIN_IDS).
 import { API_URL } from "../config.js";
 import { formatLong } from "./dates.js";
-import { confirmDialog, haptic, initData, inTelegram } from "./tg.js";
+import { confirmDialog, haptic, initData, inTelegram, openExternal } from "./tg.js";
 
 const $ = (id) => document.getElementById(id);
-const requestIds = new Map(); // дата -> id запроса (повтор того же дня не продублирует пост)
-let days = [];
+const requestIds = new Map(); // дата -> id запроса (повтор того же дня не продублирует пост в канал)
 let busy = false;
+let pollTimer = null;
+let wired = false;
 
 const newId = () =>
   globalThis.crypto?.randomUUID?.() ?? `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
-/** Текст поста для показа: HTML Telegram -> простой текст (без исполнения чего-либо). */
+/** Текст поста для показа: HTML Telegram -> простой текст (ничего не исполняется). */
 const toPlain = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent ?? "";
 
-async function api(path, payload) {
+async function api(path, payload = {}) {
   let res;
   try {
     res = await fetch(`${API_URL}${path}`, {
@@ -38,27 +39,91 @@ async function api(path, payload) {
   return data;
 }
 
+/** @returns {Promise<null | {canUpdate: boolean}>} null, если пользователь не админ или панель выключена */
 export async function detectAdmin() {
-  if (!API_URL || !inTelegram) return false;
+  if (!API_URL || !inTelegram) return null;
   try {
-    return (await api("/api/me", {})).admin === true;
+    const r = await api("/api/me");
+    return r.admin === true ? { canUpdate: r.canUpdate === true } : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function setStatus(text) {
-  $("adminStatus").textContent = text;
-}
+const setStatus = (text) => ($("adminStatus").textContent = text);
 
 function setBusy(value) {
   busy = value;
-  for (const id of ["adminSend", "adminReload"]) $(id).disabled = value;
+  for (const id of ["adminSend", "adminTest", "adminReload"]) $(id).disabled = value;
   document.querySelectorAll("#adminList input[type=checkbox]").forEach((c) => {
     c.disabled = value || c.dataset.locked === "1";
   });
 }
 
+// ---------- данные расписания ----------
+const fmtTime = (iso) =>
+  iso ? new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+
+function describeRun(run, error) {
+  if (error) return `GitHub: ${error}`;
+  if (!run) return "Запусков обновления ещё не было.";
+  if (run.status !== "completed") return `⏳ Обновление идёт с ${fmtTime(run.created_at)}…`;
+  if (run.conclusion === "success") return `✅ Последнее обновление успешно: ${fmtTime(run.updated_at)}. Сайт обновится в течение пары минут.`;
+  return `❌ Последнее обновление не удалось (${run.conclusion}): ${fmtTime(run.updated_at)}.`;
+}
+
+function stopPolling() {
+  clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+async function refreshStatus({ canUpdate }) {
+  stopPolling();
+  try {
+    const st = await api("/api/status");
+    const s = st.schedule;
+    const empty = !s || !s.with_data;
+    $("adminDataSummary").textContent = empty ? "⚠ Данные расписания: нет" : `Данные расписания: до ${s.covered_until ?? "?"}`;
+    $("adminDataInfo").textContent = s
+      ? `Обновлено: ${fmtTime(s.generated_at)} · улиц в базе: ${s.streets} · с вывозом: ${s.with_data}${s.covered_until ? ` · календарь AWG до ${s.covered_until}` : ""}`
+      : "Не удалось прочитать расписание с сайта.";
+    $("adminRunInfo").textContent = st.canUpdate ? describeRun(st.run, st.runError) : "";
+    $("adminUpdateBox").hidden = !st.canUpdate;
+    $("adminUpdateHint").hidden = st.canUpdate;
+    const running = st.run && st.run.status !== "completed";
+    $("adminData").open = empty || running || (st.run && st.run.conclusion !== "success");
+    $("adminUpdate").disabled = Boolean(running);
+    if (running) pollTimer = setTimeout(() => refreshStatus({ canUpdate }), 15_000);
+    return st;
+  } catch (e) {
+    $("adminDataInfo").textContent = `❌ ${e.message}`;
+    return null;
+  }
+}
+
+async function startUpdate(ctx) {
+  const quick = $("adminQuick").checked;
+  const force = $("adminForce").checked;
+  const ok = await confirmDialog(
+    quick
+      ? "Запустить пробный прогон обновления (20 улиц)? Данные на сайте изменятся только если всё прошло успешно."
+      : `Запустить ${force ? "полное " : ""}обновление расписания из AWG? Это займёт от нескольких минут до часа.`,
+  );
+  if (!ok) return;
+  $("adminUpdate").disabled = true;
+  $("adminRunInfo").textContent = "Запускаю…";
+  try {
+    await api("/api/update", { quick, force });
+    haptic("medium");
+    $("adminRunInfo").textContent = "✅ Запущено. Статус обновляется сам.";
+    pollTimer = setTimeout(() => refreshStatus(ctx), 5_000);
+  } catch (e) {
+    $("adminRunInfo").textContent = `❌ ${e.message}`;
+    $("adminUpdate").disabled = false;
+  }
+}
+
+// ---------- список дней ----------
 function itemNode(day) {
   const li = document.createElement("li");
   li.className = "adm__item";
@@ -70,8 +135,7 @@ function itemNode(day) {
   const box = document.createElement("input");
   box.type = "checkbox";
   box.checked = day.canPublish;
-  box.disabled = !day.canPublish;
-  box.dataset.locked = day.canPublish ? "0" : "1";
+  box.dataset.locked = "0";
   const title = document.createElement("span");
   title.textContent = `${formatLong(day.date)} · ${day.count} ул.`;
   label.append(box, title);
@@ -94,6 +158,7 @@ function itemNode(day) {
   pre.textContent = day.messages.map(toPlain).join("\n\n— — —\n\n");
   det.append(sum, pre);
   li.append(det);
+  li.dataset.canPublish = day.canPublish ? "1" : "0";
   return li;
 }
 
@@ -103,29 +168,33 @@ async function loadPreview(start, count) {
   $("adminList").replaceChildren();
   try {
     const res = await api("/api/preview", { start, days: count });
-    days = res.days;
-    $("adminList").replaceChildren(...days.map(itemNode));
-    const ok = days.filter((d) => d.canPublish).length;
-    setStatus(ok ? "Отметьте дни и нажмите «Отправить в канал»." : "Нет дней, которые можно опубликовать.");
+    $("adminList").replaceChildren(...res.days.map(itemNode));
+    const ok = res.days.filter((d) => d.canPublish).length;
+    setStatus(
+      ok
+        ? "Отметьте дни. «Тест себе» отправит в ваш админ-чат, «Отправить в канал» опубликует для всех."
+        : "Нет дней, которые можно опубликовать в канал (тест себе всё равно доступен).",
+    );
   } catch (e) {
-    days = [];
     setStatus(`❌ ${e.message}`);
   } finally {
     setBusy(false);
   }
 }
 
-function itemOf(date) {
-  return document.querySelector(`#adminList li[data-date="${date}"]`);
-}
+const itemOf = (date) => document.querySelector(`#adminList li[data-date="${date}"]`);
 
-async function send() {
-  const selected = [...document.querySelectorAll("#adminList li")]
-    .filter((li) => li.querySelector("input[type=checkbox]").checked)
-    .map((li) => li.dataset.date);
+/** @param {boolean} test true: в админ-чат; false: в канал */
+async function send(test) {
+  const items = [...document.querySelectorAll("#adminList li")].filter((li) => li.querySelector("input[type=checkbox]").checked);
+  const selected = items.map((li) => li.dataset.date);
   if (!selected.length) return setStatus("Не выбрано ни одного дня.");
-  const ok = await confirmDialog(`Отправить в канал ${selected.length} дн.: ${selected[0]} … ${selected.at(-1)}?\nЭто увидят все подписчики.`);
-  if (!ok) return;
+  if (!test) {
+    const blocked = items.filter((li) => li.dataset.canPublish !== "1");
+    if (blocked.length) return setStatus("Среди выбранных есть дни без данных AWG: в канал их отправить нельзя (только тест).");
+    const ok = await confirmDialog(`Отправить в канал ${selected.length} дн.: ${selected[0]} … ${selected.at(-1)}?\nЭто увидят все подписчики.`);
+    if (!ok) return;
+  }
 
   setBusy(true);
   let done = 0;
@@ -135,38 +204,52 @@ async function send() {
     const li = itemOf(date);
     const st = li.querySelector('[data-role="status"]');
     st.textContent = "⏳";
-    if (!requestIds.has(date)) requestIds.set(date, newId());
+    // для тестов всегда новый id: тест можно повторять сколько угодно
+    const requestId = test ? newId() : (requestIds.get(date) ?? requestIds.set(date, newId()).get(date));
     try {
-      const r = await api("/api/publish", { date, requestId: requestIds.get(date) });
-      st.textContent = r.duplicate ? "✅ уже отправлено" : "✅ отправлено";
-      const box = li.querySelector("input[type=checkbox]");
-      box.checked = false;
-      box.dataset.locked = "1";
+      const r = await api("/api/publish", { date, requestId, test });
+      st.textContent = test ? "🧪 в чате" : r.duplicate ? "✅ уже отправлено" : "✅ отправлено";
+      if (!test) {
+        const box = li.querySelector("input[type=checkbox]");
+        box.checked = false;
+        box.dataset.locked = "1";
+      }
       done++;
     } catch (e) {
       st.textContent = "❌";
-      st.title = e.message;
       failed++;
       lastError = `${date}: ${e.message}`;
-      if (e.code === "expired" || e.code === "unauthorized" || e.code === "forbidden") break; // дальше нет смысла
+      if (["expired", "unauthorized", "forbidden"].includes(e.code)) break; // дальше нет смысла
     }
-    setStatus(`Отправлено ${done} из ${selected.length}…`);
+    setStatus(`${test ? "Тест" : "Отправлено"}: ${done} из ${selected.length}…`);
   }
   haptic(failed ? "heavy" : "medium");
   setBusy(false);
   setStatus(
     failed
-      ? `❌ Отправлено ${done}, не удалось ${failed}. Последняя ошибка: ${lastError}. Неудачные дни остались отмеченными: исправьте причину и нажмите «Отправить» ещё раз.`
-      : `✅ Готово: отправлено ${done} дн.`,
+      ? `❌ Успешно ${done}, не удалось ${failed}. Последняя ошибка: ${lastError}. Неудачные дни остались отмеченными: исправьте причину и повторите.`
+      : test
+        ? `🧪 Готово: ${done} дн. отправлено в ваш админ-чат, в канал ничего не ушло.`
+        : `✅ Готово: отправлено в канал ${done} дн.`,
   );
 }
 
-export function openAdmin({ start, days: count = 7 }) {
+export function openAdmin({ start, days: count = 7, canUpdate = false }) {
   requestIds.clear();
+  const ctx = { canUpdate };
   $("adminHint").textContent = `Список на ${count} дн. от ${formatLong(start)}. Дата выставления, вывоз AWG на следующий день.`;
   $("adminDlg").showModal();
+  refreshStatus(ctx);
   loadPreview(start, count);
+
   $("adminReload").onclick = () => !busy && loadPreview(start, count);
-  $("adminSend").onclick = () => !busy && send();
+  $("adminSend").onclick = () => !busy && send(false);
+  $("adminTest").onclick = () => !busy && send(true);
+  $("adminUpdate").onclick = () => startUpdate(ctx);
   $("adminClose").onclick = () => $("adminDlg").close();
+  if (!wired) {
+    wired = true;
+    $("adminDlg").addEventListener("close", stopPolling);
+    $("adminRunInfo").addEventListener("click", (e) => e.target.tagName === "A" && (e.preventDefault(), openExternal(e.target.href)));
+  }
 }
