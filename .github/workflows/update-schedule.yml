@@ -32,6 +32,8 @@ jobs:
       NOMINATIM_USER_AGENT: wuppertal-sperrmuell/1.0 (https://github.com/${{ github.repository }})
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # полная история нужна для rebase при отправке данных
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -69,7 +71,16 @@ jobs:
             echo "Изменений нет"
           else
             git commit -m "data: update schedule $(date -u +%F)"
-            git push
+            # Пока шёл прогон, в main могли появиться другие коммиты: переносим наш коммит поверх них и повторяем.
+            # При конфликте в файлах данных побеждает наша (свежая) версия.
+            for i in 1 2 3 4 5; do
+              if git push origin HEAD:main; then exit 0; fi
+              echo "push отклонён (в main появились новые коммиты), попытка $i из 5: rebase и повтор"
+              git pull --rebase -X theirs origin main
+              sleep $((i * 3))
+            done
+            echo "Не удалось отправить данные после 5 попыток"
+            exit 1
           fi
 
       - name: Сообщить админу о сбое
