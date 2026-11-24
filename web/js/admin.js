@@ -2,7 +2,7 @@
 // Панель только интерфейс: права, отправку и запуск обновления выполняет Worker (проверяет подпись Telegram и ADMIN_IDS).
 import { API_URL } from "../config.js";
 import { formatLong } from "./dates.js";
-import { confirmDialog, haptic, initData, inTelegram, openExternal } from "./tg.js";
+import { confirmDialog, haptic, initData, inTelegram, openExternal, telegramUserId } from "./tg.js";
 
 const $ = (id) => document.getElementById(id);
 const requestIds = new Map(); // дата -> id запроса (повтор того же дня не продублирует пост в канал)
@@ -34,7 +34,7 @@ async function api(path, payload = {}) {
     /* ответ не JSON */
   }
   if (!res.ok || !data?.ok) {
-    throw Object.assign(new Error(data?.message ?? `Ошибка сервера (${res.status}).`), { code: data?.error ?? "http" });
+    throw Object.assign(new Error(data?.message ?? `Ошибка сервера (${res.status}).`), { code: data?.error ?? "http", reason: data?.reason, status: res.status });
   }
   return data;
 }
@@ -47,6 +47,34 @@ export async function detectAdmin() {
     return r.admin === true ? { canUpdate: r.canUpdate === true } : null;
   } catch {
     return null;
+  }
+}
+
+/** Объясняет простыми словами, почему кнопки админа нет. Показывается по 5 нажатиям на заголовок. */
+export async function diagnose() {
+  const lines = [`Диагностика админ-панели`, `Адрес приложения: ${location.origin}`];
+  if (!API_URL) return [...lines, "❌ В web/config.js пуст API_URL: панель выключена."];
+  lines.push(`Worker: ${API_URL}`);
+  if (!inTelegram) {
+    return [...lines, "❌ Telegram не передал данные (initData пуст). Откройте приложение через бота: кнопка меню или ссылка t.me/…; запуск с кнопки клавиатуры и обычный браузер данных не дают."];
+  }
+  const id = telegramUserId();
+  lines.push(`Ваш Telegram ID: ${id ?? "не определён"}`);
+  try {
+    const r = await api("/api/me");
+    if (r.admin) return [...lines, "✅ Подпись верна, вы админ: кнопка 📣 должна быть рядом с заголовком. Если её нет, закройте и откройте приложение заново."];
+    return [...lines, `❌ Подпись верна, но ID ${id} нет в ADMIN_IDS. Проверьте секрет: в папке worker выполните npx wrangler secret put ADMIN_IDS и введите только число, без кавычек и пробелов. Если переменную добавляли в панели Cloudflare, команда wrangler deploy могла её удалить: используйте именно secret put.`];
+  } catch (e) {
+    if (e.code === "network") {
+      return [...lines, `❌ Нет ответа от Worker. Либо адрес неверный/Worker не развёрнут, либо ALLOWED_ORIGIN в worker/wrangler.toml не равен ${location.origin} (без слеша в конце), после правки нужен npx wrangler deploy.`];
+    }
+    if (e.code === "forbidden_origin") return [...lines, `❌ ALLOWED_ORIGIN в wrangler.toml не совпадает с ${location.origin}. Исправьте и выполните npx wrangler deploy.`];
+    if (e.code === "unauthorized") {
+      const hint = { bad_signature: "BOT_TOKEN в Worker не от того бота, через которого открыто приложение (или в токене опечатка). Задайте заново: npx wrangler secret put BOT_TOKEN.", malformed: "Telegram прислал некорректные данные запуска.", no_user: "В данных запуска нет пользователя." }[e.reason] ?? "Неизвестная причина.";
+      return [...lines, `❌ Подпись Telegram не принята (${e.reason ?? "?"}): ${hint}`];
+    }
+    if (e.code === "expired") return [...lines, "❌ Сессия устарела: закройте и откройте приложение заново."];
+    return [...lines, `❌ ${e.message} (код ${e.code ?? e.status ?? "?"})`];
   }
 }
 

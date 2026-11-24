@@ -6,7 +6,7 @@ import { isStale, lastPickupDate, stopPoints, streetsForPutOut } from "./schedul
 import { haversineKm, planRoute } from "./routing.js";
 import { haptic, initTelegram, openChannel, openExternal, setMainButton, startParam } from "./tg.js";
 import { CHANNEL_URL } from "../config.js";
-import { detectAdmin, openAdmin } from "./admin.js";
+import { detectAdmin, diagnose, openAdmin } from "./admin.js";
 
 const CITY = "Wuppertal";
 const CITY_CENTER = [51.2562, 7.1508];
@@ -391,6 +391,17 @@ function bindUi() {
   });
   $("sheetToggle").addEventListener("click", () => setCollapsed($("sheet").dataset.collapsed !== "true"));
   $("nearest").addEventListener("click", showNearest);
+  // 5 нажатий на заголовок за 3 секунды: диагностика админ-панели (показывает только данные самого пользователя)
+  let taps = [];
+  document.querySelector(".top__title").addEventListener("click", async (e) => {
+    if (e.target.closest("#adminBtn")) return;
+    const now = Date.now();
+    taps = [...taps.filter((t) => now - t < 3000), now];
+    if (taps.length < 5) return;
+    taps = [];
+    banner("Проверяю…");
+    banner((await diagnose()).join("\n"), { action: { label: "Закрыть", run: clearBanner } });
+  });
   $("promo").addEventListener("click", (e) => {
     e.preventDefault();
     openChannel(CHANNEL_URL);

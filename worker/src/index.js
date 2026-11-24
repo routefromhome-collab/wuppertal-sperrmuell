@@ -68,10 +68,23 @@ export function describeDay(iso, { schedule, coords }, env, nowMs) {
 }
 
 async function authenticate(request, env, body, deps, maxAgeSec) {
+  if (!env.BOT_TOKEN) {
+    console.error("BOT_TOKEN не задан");
+    return { error: fail(request, env, 500, "misconfigured", "В Worker не задан BOT_TOKEN.") };
+  }
   const v = await verifyInitData(body.initData, env.BOT_TOKEN, { maxAgeSec, nowMs: deps.now() });
   if (!v.ok) {
+    console.warn("подпись Telegram не принята:", v.reason);
     const expired = v.reason === "expired";
-    return { error: fail(request, env, 401, expired ? "expired" : "unauthorized", expired ? "Сессия устарела: закройте и откройте приложение заново." : "Не удалось подтвердить Telegram.") };
+    // reason безопасен для показа: подделать подпись он не помогает, а админу сразу видно причину
+    return {
+      error: json(request, env, 401, {
+        ok: false,
+        error: expired ? "expired" : "unauthorized",
+        reason: v.reason,
+        message: expired ? "Сессия устарела: закройте и откройте приложение заново." : "Не удалось подтвердить Telegram.",
+      }),
+    };
   }
   return { user: v.user };
 }
@@ -177,6 +190,7 @@ export async function handle(request, env, deps) {
   const auth = await authenticate(request, env, body, deps, isPublish ? 3600 : 86400);
   if (auth.error) return auth.error;
   const admin = isAdmin(env, auth.user);
+  if (!admin) console.warn("пользователь не админ, id =", auth.user.id, "| ADMIN_IDS задан:", Boolean(env.ADMIN_IDS));
 
   if (url.pathname === "/api/me") return json(request, env, 200, { ok: true, admin, canUpdate: admin && canUpdate(env) });
   if (!admin) return fail(request, env, 403, "forbidden", "Нет прав администратора.");

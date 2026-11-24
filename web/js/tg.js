@@ -23,6 +23,7 @@ export function startParam() {
 }
 
 export const initData = () => tg?.initData ?? "";
+export const telegramUserId = () => tg?.initDataUnsafe?.user?.id ?? null;
 
 /** Подтверждение: нативное окно Telegram (6.2+) или window.confirm вне Telegram. */
 export function confirmDialog(message) {

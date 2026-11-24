@@ -272,3 +272,16 @@ test("status: возраст данных и последний запуск; д
   assert.equal(noGh.run, null);
   assert.equal((await call("/api/status", { initData: initFor(GUEST) }, { env: makeEnv(GH_ENV), deps: makeDeps({ runs: [run] }).deps })).status, 403);
 });
+
+test("отказ подписи объясняет причину; без BOT_TOKEN понятная ошибка", async () => {
+  const wrongToken = signInitData({ user: ADMIN, token: "999:another-bot" });
+  const r = await call("/api/me", { initData: wrongToken });
+  const out = await r.json();
+  assert.equal(r.status, 401);
+  assert.deepEqual([out.error, out.reason], ["unauthorized", "bad_signature"]);
+  const noToken = await call("/api/me", { initData: initFor(ADMIN) }, { env: makeEnv({ BOT_TOKEN: "" }) });
+  assert.equal(noToken.status, 500);
+  assert.match((await noToken.json()).message, /BOT_TOKEN/);
+  const old = await (await call("/api/me", { initData: signInitData({ user: ADMIN, authDate: NOW / 1000 - 999999 }) })).json();
+  assert.equal(old.error, "expired");
+});
