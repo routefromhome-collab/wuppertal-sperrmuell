@@ -149,3 +149,11 @@ test("пеший маршрут: разбор ответа OSRM и отказо�
   await fetchWalkRoute([51.2, 7.1], [51.21, 7.11], { fetchImpl: async (u) => { url = u; return { ok: true, json: async () => ok }; } });
   assert.match(url, /\/foot\/7\.1,51\.2;7\.11,51\.21\?/); // OSRM ждёт lon,lat
 });
+
+test("предупреждение о неточной геопозиции", async () => {
+  const { accuracyNote } = await import("../../web/js/nearest.js");
+  assert.equal(accuracyNote(30), "");
+  assert.equal(accuracyNote(undefined), "");
+  assert.match(accuracyNote(2500), /±2,5 км/);
+  assert.match(accuracyNote(800), /±800 м/);
+});

@@ -27,3 +27,10 @@ export function rankStops(pos, stops, coords) {
   // при равенстве расстояния порядок стабилен по имени
   return ranked.sort((a, b) => a.km - b.km || a.stop.name.localeCompare(b.stop.name, "de"));
 }
+
+/** Предупреждение, если браузер определил позицию грубо (по IP/Wi-Fi): часто бывает в Opera, десктопных браузерах и VPN. */
+export function accuracyNote(accuracyM) {
+  if (!Number.isFinite(accuracyM) || accuracyM <= 500) return "";
+  const text = accuracyM >= 1000 ? `${(accuracyM / 1000).toFixed(1).replace(".", ",")} км` : `${Math.round(accuracyM)} м`;
+  return `⚠️ Позиция неточная (±${text}), проверьте на карте. `;
+}

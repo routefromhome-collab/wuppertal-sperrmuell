@@ -1,7 +1,7 @@
 // Публичная страница «карта дня»: map.html?d=YYYY-MM-DD, d = день, когда улицы выставляют (правило D-1).
 // Без Telegram, без админки и без навигации по датам: ссылка из поста всегда показывает ровно один день.
 import { formatLong, isValidIso, putOutToPickup, todayBerlin } from "./dates.js";
-import { FAR_AWAY_KM, rankStops } from "./nearest.js";
+import { FAR_AWAY_KM, accuracyNote, rankStops } from "./nearest.js";
 import { planRoute } from "./routing.js";
 import { lastPickupDate, stopPoints, streetsForPutOut } from "./schedule.js";
 import { setupSheet } from "./sheet.js";
@@ -150,7 +150,7 @@ function renderList() {
 const locate = () =>
   new Promise((res, rej) => {
     if (!navigator.geolocation) return rej(new Error("unsupported"));
-    navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude]), rej, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 15_000 });
+    navigator.geolocation.getCurrentPosition((p) => res(Object.assign([p.coords.latitude, p.coords.longitude], { accuracy: p.coords.accuracy })), rej, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 15_000 });
   });
 
 async function showNearest() {
@@ -170,25 +170,27 @@ async function showNearest() {
     st.query = "";
     $("search").value = "";
     userLayer.clearLayers();
+    if (pos.accuracy > 50) L.circle(pos, { radius: pos.accuracy, color: "#1a73e8", weight: 1, fillOpacity: 0.08, interactive: false }).addTo(userLayer);
     L.circleMarker(pos, { radius: 7, color: "#1a73e8", weight: 3, fillColor: "#fff", fillOpacity: 1 }).bindTooltip("Вы здесь").addTo(userLayer);
     renderList();
     $("list").scrollTop = 0;
     const best = ranked[0];
     const far = best.km > FAR_AWAY_KM;
+    const note = accuracyNote(pos.accuracy);
     focusStreet(best.stop, best.point.houses.length ? best.point : null, { fly: far });
     const label = best.point.label;
     flash(
       far
-        ? `Вы далеко: ближайшая точка (${label}) в ${formatDistance(best.km)}.`
-        : `Ближайшая: ${label} · ${formatDistance(best.km)} по прямой · ~${walkMinutes(best.km)} мин пешком`,
+        ? `${note}Вы далеко: ближайшая точка (${label}) в ${formatDistance(best.km)}.`
+        : `${note}Ближайшая: ${label} · ${formatDistance(best.km)} по прямой · ~${walkMinutes(best.km)} мин пешком`,
       60_000,
     );
     if (far) return;
     const token = ++routeToken;
     map.fitBounds([pos, best.point.ll], { padding: [48, 48], maxZoom: 17 });
     const route = await drawWalkRoute({ layer: routeLayer, from: pos, to: best.point.ll, isCurrent: () => token === routeToken, accent });
-    if (route) flash(`Ближайшая: ${label} · пешком ${formatDistance(route.km)}${route.minutes ? ` · ~${route.minutes} мин` : ""}`, 15_000);
-    else if (token === routeToken) flash(`Ближайшая: ${label} · ${formatDistance(best.km)} по прямой · ~${walkMinutes(best.km)} мин пешком (точный путь не построился)`, 12_000);
+    if (route) flash(`${note}Ближайшая: ${label} · пешком ${formatDistance(route.km)}${route.minutes ? ` · ~${route.minutes} мин` : ""}`, 15_000);
+    else if (token === routeToken) flash(`${note}Ближайшая: ${label} · ${formatDistance(best.km)} по прямой · ~${walkMinutes(best.km)} мин пешком (точный путь не построился)`, 12_000);
   } finally {
     btn.disabled = false;
   }

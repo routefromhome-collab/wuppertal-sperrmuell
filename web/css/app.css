@@ -122,14 +122,7 @@ button { cursor: pointer; }
   display: inline-block; padding: 6px 10px; border-radius: 8px; background: #1a73e8; color: #fff !important; text-decoration: none; font-weight: 600;
 }
 
-/* --- баннер канала --- */
-.promo {
-  position: absolute; top: 8px; left: 8px; z-index: 500; max-width: min(250px, 62vw);
-  background: var(--bg); color: var(--fg); text-decoration: none; border-radius: 12px; padding: 7px 10px;
-  box-shadow: 0 2px 10px rgba(0,0,0,.18); font-size: 12px; line-height: 1.25;
-}
-.promo strong { display: block; font-size: 12.5px; }
-.promo span { color: var(--hint); }
+/* --- кнопки в шапке --- */
 .icon-btn--sm { width: 28px; height: 28px; font-size: 14px; margin-left: 6px; vertical-align: middle; }
 .icon-btn[hidden] { display: none; }
 
