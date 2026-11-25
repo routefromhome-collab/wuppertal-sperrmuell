@@ -1,8 +1,10 @@
 // Админы из приложения: владельцы заданы секретом ADMIN_IDS, остальные хранятся в KV (ключ "admins").
 // Любой админ может добавлять и удалять добавленных админов; владельцев из ADMIN_IDS удалить нельзя.
 import { adminIds } from "./auth.js";
+import { getProfile, profileOf } from "./telegram.js";
 
 const KEY = "admins";
+const PROFILES = "profiles"; // id -> {username?, name?}: чтобы в списке показывать ник, а не число
 export const MAX_EXTRA = 20;
 export const validId = (v) => /^\d{5,15}$/.test(String(v));
 
@@ -25,11 +27,58 @@ export async function isAdminAny(env, user) {
   return Object.hasOwn(await loadExtra(env), id);
 }
 
-export async function listAdmins(env) {
+async function loadProfiles(env) {
+  if (!env.STATE) return {};
+  try {
+    const raw = await env.STATE.get(PROFILES);
+    const data = raw ? JSON.parse(raw) : null;
+    return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+const same = (a, b) => a?.username === b?.username && a?.name === b?.name;
+
+/** Запоминает ник/имя пользователя, когда он сам пользуется приложением (пишем в KV, только если что-то изменилось). */
+export async function recordProfile(env, user) {
+  if (!env.STATE) return;
+  const p = profileOf(user);
+  if (!p) return;
+  const profiles = await loadProfiles(env);
+  if (same(profiles[String(user.id)], p)) return;
+  profiles[String(user.id)] = p;
+  await env.STATE.put(PROFILES, JSON.stringify(profiles));
+}
+
+/** Для тех, чьего профиля нет, пробуем спросить Telegram (получится, если человек уже писал боту). */
+async function fillMissing(env, deps, ids, profiles) {
+  const missing = ids.filter((id) => !profiles[id]).slice(0, 10);
+  if (!missing.length || !env.BOT_TOKEN || !deps?.fetch) return profiles;
+  let changed = false;
+  await Promise.all(
+    missing.map(async (id) => {
+      const p = await getProfile(deps.fetch, env.BOT_TOKEN, id);
+      if (p) {
+        profiles[id] = p;
+        changed = true;
+      }
+    }),
+  );
+  if (changed && env.STATE) await env.STATE.put(PROFILES, JSON.stringify(profiles));
+  return profiles;
+}
+
+const label = (id, p) => (p?.username ? `@${p.username}` : p?.name ?? null) ?? null;
+
+export async function listAdmins(env, deps) {
   const extra = await loadExtra(env);
+  const owners = [...adminIds(env)];
+  const profiles = await fillMissing(env, deps, [...owners, ...Object.keys(extra), ...Object.values(extra).map((v) => v.by)], await loadProfiles(env));
+  const nameOf = (id) => label(id, profiles[String(id)]);
   return {
-    owners: [...adminIds(env)],
-    extra: Object.entries(extra).map(([id, v]) => ({ id, by: v.by, at: v.at })),
+    owners: owners.map((id) => ({ id, label: nameOf(id) })),
+    extra: Object.entries(extra).map(([id, v]) => ({ id, label: nameOf(id), by: v.by, byLabel: nameOf(v.by), at: v.at })),
     canManage: Boolean(env.STATE),
   };
 }
