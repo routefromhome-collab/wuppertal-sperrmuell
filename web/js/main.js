@@ -415,7 +415,7 @@ async function setupAdmin() {
   const admin = await detectAdmin();
   if (admin) {
     $("adminBtn").hidden = false;
-    $("adminBtn").addEventListener("click", () => openAdmin({ start: state.start, days: 7, canUpdate: admin.canUpdate }));
+    $("adminBtn").addEventListener("click", () => openAdmin({ start: state.start, days: 7, canUpdate: admin.canUpdate, canManage: admin.canManage }));
   }
 }
 
