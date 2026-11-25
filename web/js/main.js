@@ -3,8 +3,12 @@ import {
   addDays, formatDayNumber, formatLong, formatWeekdayShort, isValidIso, putOutToPickup, todayBerlin, window7,
 } from "./dates.js";
 import { isStale, lastPickupDate, stopPoints, streetsForPutOut } from "./schedule.js";
-import { haversineKm, planRoute } from "./routing.js";
+import { planRoute } from "./routing.js";
 import { haptic, initTelegram, openChannel, openExternal, setMainButton, startParam } from "./tg.js";
+import { FAR_AWAY_KM, rankStops } from "./nearest.js";
+import { setupSheet } from "./sheet.js";
+import { drawWalkRoute } from "./walkroute.js";
+import { STREETS, el, externalLink, formatDistance, googlePoint, plural, walkMinutes } from "./ui.js";
 import { CHANNEL_URL } from "../config.js";
 import { detectAdmin, diagnose, openAdmin } from "./admin.js";
 
@@ -21,36 +25,12 @@ const state = {
   districts: new Map(),
   days: [], // [{iso, stops, beyond}]
   userPos: null,
-  markers: new Map(),
+  markers: new Map(), // имя улицы -> [{marker, point}]
   active: null,
+  nearby: null, // Map имя улицы -> {km, point}, пока включена сортировка «Рядом»
+  hot: null, // подсвеченный маркер
 };
-
-// ---------- мелкие помощники ----------
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-const plural = (n, [one, few, many]) => {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-  return many;
-};
-const STREETS = ["улица", "улицы", "улиц"];
-const googlePoint = ([lat, lon]) => `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
-
-function externalLink(a) {
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.addEventListener("click", (e) => {
-    e.preventDefault();
-    openExternal(a.href);
-  });
-  return a;
-}
+let sheet;
 
 let flashTimer;
 function banner(message, { kind = "warn", action } = {}) {
@@ -77,6 +57,8 @@ const hasMap = typeof window.L !== "undefined";
 let map;
 let streetLayer;
 let userLayer;
+let routeLayer;
+let routeToken = 0;
 let accent = "#2e7d32";
 
 function initMap() {
@@ -99,6 +81,7 @@ function initMap() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(map);
   streetLayer = L.layerGroup().addTo(map);
+  routeLayer = L.layerGroup().addTo(map);
   userLayer = L.layerGroup().addTo(map);
   accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || accent;
 }
@@ -113,19 +96,38 @@ function popupNode(stop, latlon) {
   return box;
 }
 
+const MARKER_STYLE = { radius: 8, color: "#fff", weight: 2, fillOpacity: 0.95 };
+const HOT_STYLE = { radius: 13, color: "#fff", weight: 3, fillColor: "#e65100", fillOpacity: 1 };
+
+/** Подсвечивает выбранные маркеры (оранжевый, крупнее) и возвращает остальные к обычному виду. */
+function highlight(entries) {
+  for (const { marker } of state.hot ?? []) marker.setStyle({ ...MARKER_STYLE, fillColor: accent });
+  state.hot = entries;
+  for (const { marker } of entries) {
+    marker.setStyle(HOT_STYLE);
+    marker.bringToFront();
+  }
+}
+
 function renderMap(stops, { fit }) {
   state.markers.clear();
+  if (fit && hasMap) {
+    routeToken++;
+    routeLayer.clearLayers();
+    userLayer.clearLayers();
+  }
+  state.hot = null;
   if (!hasMap) return;
   streetLayer.clearLayers();
   const points = [];
   for (const stop of stops) {
     // улица целиком: одна точка; улица с отдельными календарями домов: точки по домам (как в старой карте)
     const markers = stopPoints(stop, state.coords).map((p) => {
-      const m = L.circleMarker(p.ll, { radius: 8, color: "#fff", weight: 2, fillColor: accent, fillOpacity: 0.95 });
+      const m = L.circleMarker(p.ll, { ...MARKER_STYLE, fillColor: accent });
       m.bindPopup(() => popupNode({ name: p.label, houses: p.houses.length && p.label === stop.name ? p.houses : [] }, p.ll), { maxWidth: 260 });
       m.addTo(streetLayer);
       points.push(p.ll);
-      return m;
+      return { marker: m, point: p };
     });
     if (markers.length) state.markers.set(stop.name, markers);
   }
@@ -165,6 +167,7 @@ function renderDays() {
     );
     b.addEventListener("click", () => {
       state.selected = i;
+      state.nearby = null;
       state.query = "";
       $("search").value = "";
       haptic();
@@ -197,12 +200,17 @@ function renderList(stops) {
     list.append(el("li", "empty", msg));
     return;
   }
-  for (const stop of stops) {
+  const ordered = state.nearby
+    ? [...stops].sort((a, b) => (state.nearby.get(a.name)?.km ?? Infinity) - (state.nearby.get(b.name)?.km ?? Infinity))
+    : stops;
+  for (const stop of ordered) {
     const li = el("li");
     const row = el("button", "row");
     row.type = "button";
     row.dataset.name = stop.name;
     if (stop.name === state.active) row.setAttribute("aria-current", "true");
+    const near = state.nearby?.get(stop.name);
+    if (near) row.append(el("span", "row__dist", formatDistance(near.km)));
     row.append(el("span", "row__name", stop.name));
     const meta = [];
     if (stop.houses.length) meta.push(`дома ${stop.houses.join(", ")}`);
@@ -235,6 +243,7 @@ function render({ fit = false } = {}) {
 function setStart(iso, { keepSelection = false } = {}) {
   if (!isValidIso(iso)) return;
   state.start = iso;
+  state.nearby = null;
   if (!keepSelection) state.selected = 0;
   $("date").value = iso;
   computeDays();
@@ -242,30 +251,36 @@ function setStart(iso, { keepSelection = false } = {}) {
 }
 
 // ---------- действия ----------
-function setCollapsed(collapsed) {
-  $("sheet").dataset.collapsed = String(collapsed);
-  $("sheetToggle").setAttribute("aria-expanded", String(!collapsed));
-  if (hasMap) setTimeout(() => map.invalidateSize(), 230);
-}
-
-function focusStreet(stop) {
+/** Показывает улицу/дом на карте и подсвечивает маркер и строку списка. point: конкретный дом (из «Рядом»). */
+function focusStreet(stop, point = null, { fly = true } = {}) {
   state.active = stop.name;
-  const markers = state.markers.get(stop.name) ?? [];
   document.querySelectorAll(".row").forEach((r) => {
-    if (r.dataset.name === stop.name) r.setAttribute("aria-current", "true");
-    else r.removeAttribute("aria-current");
+    const on = r.dataset.name === stop.name;
+    if (on) {
+      r.setAttribute("aria-current", "true");
+      r.scrollIntoView({ block: "nearest" });
+    } else r.removeAttribute("aria-current");
   });
-  if (!markers.length || !hasMap) {
+  const entries = state.markers.get(stop.name) ?? [];
+  if (!entries.length || !hasMap) {
     flash("Для этой улицы пока нет точки на карте.");
     return;
   }
-  setCollapsed(true);
-  if (markers.length === 1) {
-    map.flyTo(markers[0].getLatLng(), Math.max(map.getZoom(), 16), { duration: 0.6 });
-    markers[0].openPopup();
-  } else {
-    map.flyToBounds(markers.map((m) => m.getLatLng()), { padding: [40, 40], maxZoom: 17, duration: 0.6 });
-  }
+  const chosen = point ? entries.filter((e) => e.point.ll[0] === point.ll[0] && e.point.ll[1] === point.ll[1] && e.point.label === point.label) : entries;
+  const target = chosen.length ? chosen : entries;
+  highlight(target);
+  const wasMax = sheet.snap === "max";
+  if (wasMax) sheet.snapTo("mid"); // чтобы карта была видна; список остаётся на экране
+  setTimeout(() => {
+    map.invalidateSize();
+    if (!fly) target[0].marker.openPopup();
+    else if (target.length === 1) {
+      map.flyTo(target[0].marker.getLatLng(), Math.max(map.getZoom(), 17), { duration: 0.6 });
+      target[0].marker.openPopup();
+    } else {
+      map.flyToBounds(target.map((e) => e.marker.getLatLng()), { padding: [40, 40], maxZoom: 17, duration: 0.6 });
+    }
+  }, wasMax ? 250 : 0);
 }
 
 function locate() {
@@ -274,38 +289,61 @@ function locate() {
     navigator.geolocation.getCurrentPosition(
       (p) => resolve([p.coords.latitude, p.coords.longitude]),
       reject,
-      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 15_000 },
     );
   });
 }
 
 async function showNearest() {
-  let pos;
+  const btn = $("nearest");
+  btn.disabled = true;
   try {
-    pos = await locate();
-  } catch {
-    flash("Не удалось определить местоположение. Разрешите доступ к геопозиции.");
-    return;
+    let pos;
+    try {
+      pos = await locate();
+    } catch {
+      flash("Не удалось определить местоположение. Разрешите доступ к геопозиции.");
+      return;
+    }
+    state.userPos = pos;
+    // ищем по всем улицам выбранного дня, а не только по найденным поиском: «ближайшая» не должна зависеть от фильтра
+    const ranked = rankStops(pos, currentDay()?.stops ?? [], state.coords);
+    if (!ranked.length) {
+      flash("На выбранный день нет улиц с точками на карте.");
+      return;
+    }
+    state.nearby = new Map(ranked.map((r) => [r.stop.name, { km: r.km, point: r.point }]));
+    state.query = "";
+    $("search").value = "";
+    if (hasMap) {
+      userLayer.clearLayers();
+      L.circleMarker(pos, { radius: 7, color: "#1a73e8", weight: 3, fillColor: "#fff", fillOpacity: 1 })
+        .bindTooltip("Вы здесь")
+        .addTo(userLayer);
+    }
+    render();
+    $("list").scrollTop = 0;
+    const best = ranked[0];
+    const far = best.km > FAR_AWAY_KM;
+    focusStreet(best.stop, best.point.houses.length ? best.point : null, { fly: far });
+    haptic("medium");
+    const label = best.point.label;
+    flash(
+      far
+        ? `Вы далеко: ближайшая точка (${label}) в ${formatDistance(best.km)}. Проверьте геопозицию.`
+        : `Ближайшая: ${label} · ${formatDistance(best.km)} по прямой · ~${walkMinutes(best.km)} мин пешком`,
+      60_000,
+    );
+    if (far || !hasMap) return;
+    // маршрут к ближайшей точке: сначала пунктир, затем настоящий пеший путь
+    const token = ++routeToken;
+    map.fitBounds([pos, best.point.ll], { padding: [48, 48], maxZoom: 17 });
+    const route = await drawWalkRoute({ layer: routeLayer, from: pos, to: best.point.ll, isCurrent: () => token === routeToken, accent });
+    if (route) flash(`Ближайшая: ${label} · пешком ${formatDistance(route.km)}${route.minutes ? ` · ~${route.minutes} мин` : ""}`, 15_000);
+    else if (token === routeToken) flash(`Ближайшая: ${label} · ${formatDistance(best.km)} по прямой · ~${walkMinutes(best.km)} мин пешком (точный путь не построился)`, 12_000);
+  } finally {
+    btn.disabled = false;
   }
-  state.userPos = pos;
-  const candidates = (currentDay()?.stops ?? []).filter((s) => stopPoints(s, state.coords).length);
-  if (!candidates.length) {
-    flash("На выбранный день нет улиц с точками на карте.");
-    return;
-  }
-  const best = candidates
-    .map((s) => ({ s, km: Math.min(...stopPoints(s, state.coords).map((p) => haversineKm(pos, p.ll))) }))
-    .reduce((a, b) => (b.km < a.km ? b : a));
-  const meters = Math.round(best.km * 1000);
-  const minutes = Math.max(1, Math.round((best.km / 5) * 60));
-  if (hasMap) {
-    userLayer.clearLayers();
-    L.circleMarker(pos, { radius: 7, color: "#333", weight: 2, fillColor: "#fff", fillOpacity: 1 })
-      .bindTooltip("Вы здесь")
-      .addTo(userLayer);
-  }
-  focusStreet(best.s);
-  flash(`Ближайшая: ${best.s.name} · ${meters} м по прямой · ~${minutes} мин пешком`, 7000);
 }
 
 function buildRoute() {
@@ -389,8 +427,13 @@ function bindUi() {
     state.query = e.target.value;
     render();
   });
-  $("sheetToggle").addEventListener("click", () => setCollapsed($("sheet").dataset.collapsed !== "true"));
   $("nearest").addEventListener("click", showNearest);
+  sheet = setupSheet({
+    sheet: $("sheet"),
+    handle: $("sheetToggle"),
+    container: document.querySelector(".main"),
+    onChange: () => hasMap && map.invalidateSize(),
+  });
   // 5 нажатий на заголовок за 3 секунды: диагностика админ-панели (показывает только данные самого пользователя)
   let taps = [];
   document.querySelector(".top__title").addEventListener("click", async (e) => {

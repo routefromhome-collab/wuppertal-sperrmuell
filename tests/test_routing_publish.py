@@ -45,8 +45,22 @@ def test_google_links_empty_and_single():
 def test_message_formats():
     coords = {"Bachstr": [51.25, 7.15]}
     day = date(2026, 11, 29)
-    text = build_day_message(day, [Stop("Bachstr"), Stop("Adolf & Co", ("1", "2"))], coords, "https://t.me/bot/app")
+    text = build_day_message(day, [Stop("Bachstr"), Stop("Adolf & Co", ("1", "2"))], coords, "https://site.test/map.html")
     assert "🗑 <b>Шпера 29 November 2026:</b>" in text
     assert "Adolf &amp; Co <a" in text and "Co 1, 2" not in text  # экранирование HTML, дома в пост не идут
-    assert "startapp=2026-11-29" in text and text.rstrip().endswith("#шпера")
+    assert "map.html?d=2026-11-29" in text and text.rstrip().endswith("#шпера")
     assert build_day_message(day, [], coords, None).startswith("✅ 29 November 2026 выходной.")
+
+
+def test_expand_street_and_waypoints():
+    from sperrmuell.routing import address_query, expand_street, waypoint
+
+    assert expand_street("Gaußstr") == "Gaußstraße"
+    assert expand_street("Albert-Einstein-Str") == "Albert-Einstein-Straße"
+    assert expand_street("Breslauer Str.") == "Breslauer Straße"
+    assert expand_street("Am Waldschlößchen") == "Am Waldschlößchen"
+    assert expand_street("Bürgerallee") == "Bürgerallee"
+    assert expand_street("Brüderstr") == "Brüderstraße"  # NFD -> NFC
+    assert address_query("Gaußstr", "Wuppertal") == "Gaußstraße, Wuppertal"
+    assert waypoint("A", {"A": [51.2, 7.1]}, "Wuppertal") == "51.2,7.1"
+    assert waypoint("Amboßstr", {}, "Wuppertal") == "Amboßstraße, Wuppertal"

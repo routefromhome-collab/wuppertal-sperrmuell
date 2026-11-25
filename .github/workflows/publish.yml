@@ -31,7 +31,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
-      MINIAPP_URL: ${{ vars.MINIAPP_URL }} # например https://t.me/<бот>/<короткое_имя_приложения>
+      MAP_URL: ${{ vars.MAP_URL }} # например https://<user>.github.io/wuppertal-sperrmuell/map.html
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

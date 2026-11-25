@@ -54,7 +54,7 @@ const SCHEDULE = {
 const COORDS = { Achterbergweg: [51.25, 7.1], "Bachstr & Co": [51.26, 7.12] };
 
 function makeEnv(extra = {}) {
-  return { BOT_TOKEN: TOKEN, CHANNEL_ID: "@chan", ADMIN_IDS: "111", ALLOWED_ORIGIN: ORIGIN, DATA_BASE_URL: "https://data.test/data", MINIAPP_URL: "https://t.me/bot/app", ...extra };
+  return { BOT_TOKEN: TOKEN, CHANNEL_ID: "@chan", ADMIN_IDS: "111", ALLOWED_ORIGIN: ORIGIN, DATA_BASE_URL: "https://data.test/data", MAP_URL: "https://site.test/map.html", ...extra };
 }
 
 function makeDeps({ tgFail = null, runs = [], dispatchStatus = 204 } = {}) {
@@ -129,7 +129,7 @@ test("publish: отправляет в канал, экранирует HTML, о
   assert.equal(sent[0].chat_id, "@chan");
   assert.equal(sent[0].parse_mode, "HTML");
   assert.match(sent[0].text, /Bachstr &amp; Co/);
-  assert.ok(sent[0].text.includes("startapp=2026-11-30") && sent[0].text.endsWith("#шпера"));
+  assert.ok(sent[0].text.includes("map.html?d=2026-11-30") && sent[0].text.endsWith("#шпера"));
   assert.ok(!JSON.stringify(out).includes(TOKEN));
 });
 
@@ -172,17 +172,17 @@ test("publish: плохие входные данные", async () => {
 
 test("длинный день режется на части не длиннее 4000 символов", () => {
   const stops = Array.from({ length: 400 }, (_, i) => ({ name: `Teststraße ${i}` }));
-  const text = buildDayMessage({ iso: "2026-11-29", stops, coords: {}, miniappUrl: "https://t.me/b/a" });
+  const text = buildDayMessage({ iso: "2026-11-29", stops, coords: {}, mapUrl: "https://site.test/map.html" });
   const chunks = chunkText(text);
   assert.ok(chunks.length > 1 && chunks.every((c) => c.length <= 4000));
   assert.equal(chunks.join("\n").replace(/\n+/g, "\n"), text.replace(/\n+/g, "\n"));
 });
 
 test("формат поста совпадает с рабочим main.py", () => {
-  const text = buildDayMessage({ iso: "2026-11-29", stops: [{ name: "Bachstr" }], coords: { Bachstr: [51.25, 7.15] }, miniappUrl: "https://t.me/b/a" });
-  assert.match(text, /^🗑 <b>Шпера 29 November 2026:<\/b>\n\nBachstr <a href=".*query=Bachstr%2C%20Wuppertal">map<\/a>/);
-  assert.ok(text.includes("\n🗺 Маршрут (часть 1): <a href=\"https://www.google.com/maps/dir/Bachstr%2C%20Wuppertal/\">map</a>"));
-  assert.ok(text.includes("\n📍Полная карта на 29 November 2026: <a href=\"https://t.me/b/a?startapp=2026-11-29\">map</a>"));
+  const text = buildDayMessage({ iso: "2026-11-29", stops: [{ name: "Bachstr" }], coords: { Bachstr: [51.25, 7.15] }, mapUrl: "https://site.test/map.html" });
+  assert.match(text, /^🗑 <b>Шпера 29 November 2026:<\/b>\n\nBachstr <a href=".*query=Bachstra%C3%9Fe%2C%20Wuppertal">map<\/a>/);
+  assert.ok(text.includes("\n🗺 Маршрут (часть 1): <a href=\"https://www.google.com/maps/dir/51.25,7.15/\">map</a>"));
+  assert.ok(text.includes("\n📍Полная карта на 29 November 2026: <a href=\"https://site.test/map.html?d=2026-11-29\">map</a>"));
   assert.equal(buildDayMessage({ iso: "2026-11-29", stops: [], coords: {} }), "✅ 29 November 2026 выходной.\n\n#шпера");
 });
 

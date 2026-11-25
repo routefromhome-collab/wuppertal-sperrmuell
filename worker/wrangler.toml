@@ -8,8 +8,9 @@ compatibility_date = "2025-01-01"
 DATA_BASE_URL = "https://routefromhome-collab.github.io/wuppertal-sperrmuell/data"
 # источник страницы приложения (без пути и без слеша в конце): единственный разрешённый CORS-источник
 ALLOWED_ORIGIN = "https://routefromhome-collab.github.io"
-# ссылка на Mini App для строки «Полная карта» в посте, например https://t.me/<бот>/<приложение>
-MINIAPP_URL = ""
+# публичная карта дня для строки «Полная карта» в посте. Пусто = web/map.html рядом с DATA_BASE_URL.
+# Это обычная страница сайта, не Mini App: ссылка из канала открывается в любом браузере.
+MAP_URL = ""
 # репозиторий, где запускается workflow «Update schedule» из панели админа
 GITHUB_REPO = "routefromhome-collab/wuppertal-sperrmuell"
 

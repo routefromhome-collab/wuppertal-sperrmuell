@@ -9,7 +9,7 @@
 // Проверяется подпись Telegram (initData), свежесть и ID пользователя из ADMIN_IDS. Токен бота живёт
 // только в секретах Worker. Логика дат (D-1), выборки улиц и маршрутов общая с приложением: web/js.
 import { addDays, isValidIso, window7 } from "../../web/js/dates.js";
-import { buildDayMessage, chunkText } from "../../web/js/message.js";
+import { buildDayMessage, chunkText, resolveMapUrl } from "../../web/js/message.js";
 import { isStale, lastPickupDate, streetsForPutOut } from "../../web/js/schedule.js";
 import { isAdmin, verifyInitData } from "./auth.js";
 import { sendMessage } from "./telegram.js";
@@ -63,7 +63,7 @@ export function describeDay(iso, { schedule, coords }, env, nowMs) {
     warnings.push("Календарь AWG на эту дату не опубликован: пост «выходной» был бы неверным.");
   }
   if (isStale(schedule, nowMs)) warnings.push("Данные расписания старше 45 дней: запустите Update schedule.");
-  const text = buildDayMessage({ iso, stops, coords, miniappUrl: env.MINIAPP_URL });
+  const text = buildDayMessage({ iso, stops, coords, mapUrl: resolveMapUrl(env) });
   return { date: iso, count: stops.length, canPublish, warnings, text };
 }
 

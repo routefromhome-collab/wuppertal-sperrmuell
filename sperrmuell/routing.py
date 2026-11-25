@@ -9,10 +9,31 @@
 from __future__ import annotations
 
 import math
+import re
+import unicodedata
 from urllib.parse import quote
 
 GOOGLE_CHUNK = 20  # максимум точек в одной ссылке
 Coord = tuple[float, float]
+
+
+def expand_street(name: str) -> str:
+    """Gaußstr -> Gaußstraße, Albert-Einstein-Str -> Albert-Einstein-Straße (Google плохо находит сокращения)."""
+    name = unicodedata.normalize("NFC", " ".join(str(name).split()))
+    name = re.sub(r"(^|[\s-])Str\.?$", r"\1Straße", name)
+    return re.sub(r"([A-Za-zÄÖÜäöüß])str\.?$", r"\1straße", name)
+
+
+def address_query(name: str, city: str) -> str:
+    return f"{expand_street(name)}, {city}"
+
+
+def waypoint(name: str, coords: dict, city: str) -> str:
+    """Координаты, если есть (находятся всегда), иначе полный адрес текстом."""
+    ll = coords.get(name)
+    if ll and all(isinstance(v, (int, float)) and math.isfinite(v) for v in ll):
+        return f"{ll[0]},{ll[1]}"
+    return address_query(name, city)
 
 
 def haversine_km(a: Coord, b: Coord) -> float:
@@ -83,6 +104,13 @@ def order_points(points: list[Coord], start: Coord | None = None) -> list[int]:
     return [i - shift for i in route if i - shift >= 0]
 
 
+_COORD = re.compile(r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$")
+
+
+def _encode_waypoint(s: str) -> str:
+    return s if _COORD.match(s) else quote(s, safe="")
+
+
 def google_route_links(
     waypoints: list[str], chunk: int = GOOGLE_CHUNK
 ) -> list[str]:
@@ -96,7 +124,7 @@ def google_route_links(
         seg = waypoints[i : i + chunk]
         links.append(
             "https://www.google.com/maps/dir/"
-            + "/".join(quote(s, safe="") for s in seg)
+            + "/".join(_encode_waypoint(s) for s in seg)
             + "/"
         )
         if i + chunk >= len(waypoints):

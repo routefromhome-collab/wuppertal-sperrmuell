@@ -1,5 +1,7 @@
 // Порядок обхода (nearest neighbour + 2-opt) и ссылки Google Maps. Зеркало sperrmuell/routing.py.
 
+import { waypoint } from "./address.js";
+
 export const GOOGLE_CHUNK = 20; // максимум точек в одной ссылке
 
 export function haversineKm(a, b) {
@@ -71,13 +73,17 @@ export function orderPoints(points, start = null) {
     .filter((i) => i >= 0);
 }
 
+const COORD = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+/** Координаты "lat,lon" остаются как есть (запятая внутри пути допустима), текст кодируется. */
+const encodeWaypoint = (s) => (COORD.test(s) ? s : encodeURIComponent(s));
+
 /** Ссылки maps/dir/A/B/C/ по `chunk` точек; следующая часть начинается с последней точки предыдущей. */
 export function googleRouteLinks(waypoints, chunk = GOOGLE_CHUNK) {
   const links = [];
   for (let i = 0; i < waypoints.length; i += chunk - 1) {
     const seg = waypoints.slice(i, i + chunk);
     links.push({
-      url: "https://www.google.com/maps/dir/" + seg.map((s) => encodeURIComponent(s)).join("/") + "/",
+      url: "https://www.google.com/maps/dir/" + seg.map(encodeWaypoint).join("/") + "/",
       count: seg.length,
     });
     if (i + chunk >= waypoints.length) break;
@@ -94,7 +100,7 @@ export function planRoute(stops, coords, { city = "Wuppertal", start = null } = 
   const without = stops.filter((s) => !coords[s.name]);
   const order = orderPoints(withXY.map((s) => coords[s.name]), start);
   const names = [...order.map((i) => withXY[i].name), ...without.map((s) => s.name)];
-  const waypoints = names.map((n) => `${n}, ${city}`);
+  const waypoints = names.map((n) => waypoint(n, coords, city));
   if (start) waypoints.unshift(`${start[0]},${start[1]}`);
   return { names, links: googleRouteLinks(waypoints) };
 }

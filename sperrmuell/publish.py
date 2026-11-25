@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .dates import format_de, parse_iso, window
-from .routing import google_route_links, order_points
+from .routing import address_query, google_route_links, order_points, waypoint
 from .schedule import Stop, streets_for_putout
 from .tgapi import chunk_text, notify_admin, send_message
 
@@ -28,7 +28,7 @@ CITY = "Wuppertal"
 STALE_AFTER = timedelta(days=45)
 
 
-def build_day_message(day: date, stops: list[Stop], coords: dict, miniapp_url: str | None) -> str:
+def build_day_message(day: date, stops: list[Stop], coords: dict, map_url: str | None) -> str:
     title = format_de(day)
     if not stops:
         return f"✅ {title} выходной.\n\n#шпера"
@@ -36,7 +36,7 @@ def build_day_message(day: date, stops: list[Stop], coords: dict, miniapp_url: s
     lines = [f"🗑 <b>Шпера {title}:</b>\n"]
     for stop in stops:
         # как в рабочем main.py: только название улицы (номера домов в пост не выводятся)
-        q = quote(f"{stop.name}, {CITY}", safe="")
+        q = quote(address_query(stop.name, CITY), safe="")
         lines.append(f'{html.escape(stop.name)} <a href="https://www.google.com/maps/search/?api=1&query={q}">map</a>')
 
     # маршрут: точки с координатами по TSP, остальные в конец по алфавиту
@@ -44,12 +44,12 @@ def build_day_message(day: date, stops: list[Stop], coords: dict, miniapp_url: s
     without = [s for s in stops if s.name not in coords]
     order = order_points([tuple(coords[s.name]) for s in with_xy])
     names = [with_xy[i].name for i in order] + [s.name for s in without]
-    for n, link in enumerate(google_route_links([f"{n}, {CITY}" for n in names]), start=1):
+    for n, link in enumerate(google_route_links([waypoint(n, coords, CITY) for n in names]), start=1):
         lines.append(f'\n🗺 Маршрут (часть {n}): <a href="{link}">map</a>')
 
-    if miniapp_url:
-        sep = "&" if "?" in miniapp_url else "?"
-        lines.append(f'\n📍Полная карта на {title}: <a href="{miniapp_url}{sep}startapp={day.isoformat()}">map</a>')
+    if map_url:
+        sep = "&" if "?" in map_url else "?"
+        lines.append(f'\n📍Полная карта на {title}: <a href="{map_url}{sep}d={day.isoformat()}">map</a>')
     lines.append("\n#шпера")
     return "\n".join(lines)
 
@@ -77,10 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and not (token and chat):
         log.error("Нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID")
         return 1
-    miniapp_url = os.getenv("MINIAPP_URL")
+    map_url = os.getenv("MAP_URL")
 
     for day in window(start, args.days):
-        text = build_day_message(day, streets_for_putout(schedule, day), coords, miniapp_url)
+        text = build_day_message(day, streets_for_putout(schedule, day), coords, map_url)
         if args.dry_run:
             print(text, "\n" + "-" * 40)
             continue

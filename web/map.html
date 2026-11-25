@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex">
+  <title>Шпера Wuppertal: карта дня</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="top__row">
+        <h1 class="top__title">🗑 Шпера</h1>
+        <a id="channel" class="channel-link" href="https://t.me/schwebezeit">Канал Schwebezeit</a>
+      </div>
+      <p id="dayLine" class="dayline">Загрузка…</p>
+    </header>
+
+    <div id="banner" class="banner" role="status" hidden></div>
+
+    <main class="main">
+      <div id="map" aria-label="Карта улиц"></div>
+      <section id="sheet" class="sheet" data-snap="mid" aria-label="Список улиц">
+        <button id="sheetToggle" class="sheet__head" type="button" aria-expanded="true" aria-controls="list" aria-label="Список улиц: потяните вверх или вниз">
+          <span class="sheet__grip" aria-hidden="true"></span>
+          <span id="sheetTitle" class="sheet__title">Загрузка…</span>
+          <span id="sheetSub" class="sheet__sub"></span>
+        </button>
+        <div class="sheet__tools">
+          <input id="search" type="search" placeholder="Поиск улицы" aria-label="Поиск улицы" autocomplete="off">
+          <button id="nearest" class="btn" type="button">📍 Рядом</button>
+          <button id="routeBtn" class="btn btn--primary" type="button">🗺 Маршрут</button>
+        </div>
+        <ul id="list" class="list"></ul>
+      </section>
+    </main>
+
+    <dialog id="routeDlg" class="dlg">
+      <form method="dialog">
+        <h2 class="dlg__title">Маршрут</h2>
+        <p id="routeInfo" class="dlg__text"></p>
+        <div id="routeLinks" class="dlg__links"></div>
+        <button class="btn" value="close">Закрыть</button>
+      </form>
+    </dialog>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/map-page.js"></script>
+</body>
+</html>

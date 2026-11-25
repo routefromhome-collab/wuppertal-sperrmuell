@@ -39,7 +39,7 @@ GitHub Actions (Python)                        GitHub Pages (чистый JS, б
 2. **Settings → Pages → Source: GitHub Actions.**
 3. **Settings → Secrets and variables → Actions:**
    - secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ADMIN_CHAT_ID`
-   - variable: `MINIAPP_URL` (ссылка на Mini App вида `https://t.me/<бот>/<имя_приложения>`, нужна после шага 6)
+   - variable: `MAP_URL` (необязательно; по умолчанию ссылка на `map.html` берётся из адреса сайта)
 4. **Actions → Update schedule → Run workflow**, сначала с `limit = 20` (испытание), затем без лимита.
    Первый полный прогон геокодирует ~370 улиц, которых нет в сидовом кэше (~10 мин, Nominatim 1 запрос/сек).
 5. Дождитесь **Deploy Pages**: приложение появится на `https://<аккаунт>.github.io/<репозиторий>/`.
@@ -68,7 +68,7 @@ GitHub Actions (Python)                        GitHub Pages (чистый JS, б
 
 Настройка (один раз):
 
-1. Аккаунт на cloudflare.com (бесплатно). В `worker/wrangler.toml` проверьте `DATA_BASE_URL`, `ALLOWED_ORIGIN`, впишите `MINIAPP_URL`.
+1. Аккаунт на cloudflare.com (бесплатно). В `worker/wrangler.toml` проверьте `DATA_BASE_URL`, `ALLOWED_ORIGIN`, при желании впишите `MAP_URL`.
 2. Из каталога `worker/`: `npx wrangler login`, затем секреты:
    ```bash
    npx wrangler secret put BOT_TOKEN       # токен бота; бот должен быть админом канала с правом публикации
@@ -130,3 +130,16 @@ cd web && python -m http.server 8000                              # http://local
 2. Частые причины: `ADMIN_IDS` не задан или задан не через `npx wrangler secret put ADMIN_IDS` (переменная из панели Cloudflare может пропасть после `wrangler deploy`); `BOT_TOKEN` от другого бота; `ALLOWED_ORIGIN` не равен `https://<user>.github.io`.
 3. Логи Worker: `npx wrangler tail` в папке `worker` (видно причину отказа подписи и ID пользователя, которого нет в `ADMIN_IDS`).
 4. После правок кода: `npx wrangler deploy` (из `worker/`) и push в `main` для пересборки сайта.
+
+## Публичная карта дня для постов
+
+В пост канала попадает строка «📍Полная карта на …» со ссылкой `https://<user>.github.io/wuppertal-sperrmuell/map.html?d=YYYY-MM-DD`.
+Это обычная страница сайта (не Mini App): карта и список улиц одного дня, поиск, «Рядом», маршруты Google. Ссылка работает в любом браузере и не требует Telegram; админки и переключения дат там нет. Данные те же (`web/data`), отдельные файлы на каждый пост не создаются и коммитить ничего не нужно.
+
+## Ссылки Google Maps и немецкие названия
+
+Названия в данных AWG сокращены («Gaußstr», «Brüderstr»), и Google по такому тексту иногда не находит улицу. Поэтому точки маршрута задаются **координатами** (они находятся всегда), а для улиц без координат и для ссылок `map` рядом с названием в посте адрес пишется полностью: «Gaußstraße, Wuppertal» (`web/js/address.js`, зеркало в `sperrmuell/routing.py`).
+
+## «Рядом»: маршрут до ближайшей точки
+
+Кнопка «📍 Рядом» подсвечивает ближайший дом/улицу и рисует на карте пеший путь от вас до неё: сначала пунктир по прямой, затем настоящий путь по улицам (публичный сервер OSM `routing.openstreetmap.de`, профиль foot, ключ не нужен). Если сервер не ответил за 7 секунд, остаётся пунктир, а время считается по прямой с поправкой.
