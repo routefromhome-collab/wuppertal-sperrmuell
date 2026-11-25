@@ -11,7 +11,8 @@
 import { addDays, isValidIso, window7 } from "../../web/js/dates.js";
 import { buildDayMessage, chunkText, resolveMapUrl } from "../../web/js/message.js";
 import { isStale, lastPickupDate, streetsForPutOut } from "../../web/js/schedule.js";
-import { isAdmin, verifyInitData } from "./auth.js";
+import { addAdmin, isAdminAny, listAdmins, removeAdmin } from "./admins.js";
+import { verifyInitData } from "./auth.js";
 import { sendMessage } from "./telegram.js";
 
 const MAX_BODY = 4096 + 512;
@@ -170,7 +171,7 @@ async function update(request, env, deps, body, user) {
 export async function handle(request, env, deps) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-  if (request.method !== "POST" || !["/api/me", "/api/preview", "/api/publish", "/api/status", "/api/update"].includes(url.pathname)) {
+  if (request.method !== "POST" || !["/api/me", "/api/preview", "/api/publish", "/api/status", "/api/update", "/api/admins", "/api/admins/add", "/api/admins/remove"].includes(url.pathname)) {
     return fail(request, env, 404, "not_found", "Не найдено.");
   }
   // Только запросы со страницы приложения (CORS защищает браузер; здесь отсекаем чужие источники явно).
@@ -189,12 +190,21 @@ export async function handle(request, env, deps) {
   const isPublish = url.pathname === "/api/publish";
   const auth = await authenticate(request, env, body, deps, isPublish ? 3600 : 86400);
   if (auth.error) return auth.error;
-  const admin = isAdmin(env, auth.user);
+  const admin = await isAdminAny(env, auth.user);
   if (!admin) console.warn("пользователь не админ, id =", auth.user.id, "| ADMIN_IDS задан:", Boolean(env.ADMIN_IDS));
 
-  if (url.pathname === "/api/me") return json(request, env, 200, { ok: true, admin, canUpdate: admin && canUpdate(env) });
+  if (url.pathname === "/api/me") return json(request, env, 200, { ok: true, admin, canUpdate: admin && canUpdate(env), canManage: admin && Boolean(env.STATE) });
   if (!admin) return fail(request, env, 403, "forbidden", "Нет прав администратора.");
 
+  if (url.pathname === "/api/admins") return json(request, env, 200, { ok: true, me: String(auth.user.id), ...(await listAdmins(env)) });
+  if (url.pathname === "/api/admins/add" || url.pathname === "/api/admins/remove") {
+    const adding = url.pathname.endsWith("/add");
+    const id = String(body.id ?? "").trim();
+    const r = adding ? await addAdmin(env, id, auth.user.id, deps.now()) : await removeAdmin(env, id);
+    if (!r.ok) return fail(request, env, r.error === "no_kv" ? 501 : r.error === "owner" ? 409 : 400, r.error, r.message);
+    console.log(adding ? "admin added" : "admin removed", id, "by", auth.user.id);
+    return json(request, env, 200, { ok: true, already: Boolean(r.already), ...(await listAdmins(env)), me: String(auth.user.id) });
+  }
   if (url.pathname === "/api/status") return status(request, env, deps);
   if (url.pathname === "/api/update") return update(request, env, deps, body, auth.user);
 

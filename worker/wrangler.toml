@@ -22,8 +22,8 @@ GITHUB_REPO = "routefromhome-collab/wuppertal-sperrmuell"
 #   GH_TOKEN        (необязательно) токен GitHub для кнопки «Обновить данные AWG» в панели:
 #                   fine-grained token только на этот репозиторий, право «Actions: Read and write»
 
-# (необязательно) KV для защиты от двойной отправки:
+# KV нужен для защиты от двойной отправки и для списка админов, добавляемых из приложения:
 #   npx wrangler kv namespace create STATE   и вставьте id ниже
-# [[kv_namespaces]]
-# binding = "STATE"
-# id = "<id>"
+[[kv_namespaces]]
+binding = "STATE"
+id = "8de63cf7f3254580a7923b4397dc1533"
