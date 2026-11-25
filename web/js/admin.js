@@ -53,6 +53,10 @@ export async function detectAdmin() {
 // ---------- список админов ----------
 const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString("ru-RU") : "");
 
+let teamLabels = {};
+/** Ник (@name) или имя; если Telegram их не дал, показываем ID. */
+const who = (id, label) => label || id;
+
 function renderTeam(t) {
   const list = $("adminTeamList");
   list.replaceChildren();
@@ -63,7 +67,8 @@ function renderTeam(t) {
     line.className = "adm__line";
     const span = document.createElement("span");
     span.style.flex = "1";
-    span.textContent = `${id}${id === t.me ? " (вы)" : ""} · ${note}`;
+    span.textContent = `${who(id, labels[id])}${id === t.me ? " (вы)" : ""} · ${note}`;
+    span.title = `Telegram ID ${id}`;
     line.append(span);
     if (removable) {
       const b = document.createElement("button");
@@ -76,9 +81,13 @@ function renderTeam(t) {
     li.append(line);
     list.append(li);
   };
-  t.owners.forEach((id) => add(id, "владелец (ADMIN_IDS)", false));
-  t.extra.forEach((a) => add(a.id, `добавлен ${fmtDate(a.at)}${a.by ? `, кем: ${a.by}` : ""}`, true));
+  const labels = {};
+  t.owners.forEach((o) => (labels[o.id] = o.label));
+  t.extra.forEach((a) => (labels[a.id] = a.label));
+  t.owners.forEach((o) => add(o.id, "владелец", false));
+  t.extra.forEach((a) => add(a.id, `добавлен ${fmtDate(a.at)}${a.by ? `, кем: ${a.byLabel ?? a.by}` : ""}`, true));
   $("adminTeamSummary").textContent = `Админы: ${t.owners.length + t.extra.length}`;
+  teamLabels = labels;
 }
 
 async function loadTeam() {
@@ -102,7 +111,7 @@ async function changeTeam(path, id) {
 }
 
 async function removeTeam(id) {
-  if (!(await confirmDialog(`Убрать права админа у ${id}?`))) return;
+  if (!(await confirmDialog(`Убрать права админа у ${who(id, teamLabels[id])}?`))) return;
   await changeTeam("/api/admins/remove", id);
 }
 
