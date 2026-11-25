@@ -1,4 +1,4 @@
-// Cloudflare Worker: публикация списка улиц в канал из Mini App (только для админов)
+// Cloudflare Worker: публикация списка улиц в канал из Mini App (только для админов).
 //
 //   POST /api/me       {initData}                          -> {ok, admin}
 //   POST /api/preview  {initData, start, days}             -> {ok, days:[{date, count, canPublish, warnings, messages}]}
@@ -11,7 +11,7 @@
 import { addDays, isValidIso, window7 } from "../../web/js/dates.js";
 import { buildDayMessage, chunkText, resolveMapUrl } from "../../web/js/message.js";
 import { isStale, lastPickupDate, streetsForPutOut } from "../../web/js/schedule.js";
-import { addAdmin, isAdminAny, listAdmins, removeAdmin } from "./admins.js";
+import { addAdmin, isAdminAny, listAdmins, recordProfile, removeAdmin } from "./admins.js";
 import { verifyInitData } from "./auth.js";
 import { sendMessage } from "./telegram.js";
 
@@ -193,17 +193,19 @@ export async function handle(request, env, deps) {
   const admin = await isAdminAny(env, auth.user);
   if (!admin) console.warn("пользователь не админ, id =", auth.user.id, "| ADMIN_IDS задан:", Boolean(env.ADMIN_IDS));
 
+  if (admin && url.pathname === "/api/me") await recordProfile(env, auth.user).catch((e) => console.warn("profile not saved:", e));
+
   if (url.pathname === "/api/me") return json(request, env, 200, { ok: true, admin, canUpdate: admin && canUpdate(env), canManage: admin && Boolean(env.STATE) });
   if (!admin) return fail(request, env, 403, "forbidden", "Нет прав администратора.");
 
-  if (url.pathname === "/api/admins") return json(request, env, 200, { ok: true, me: String(auth.user.id), ...(await listAdmins(env)) });
+  if (url.pathname === "/api/admins") return json(request, env, 200, { ok: true, me: String(auth.user.id), ...(await listAdmins(env, deps)) });
   if (url.pathname === "/api/admins/add" || url.pathname === "/api/admins/remove") {
     const adding = url.pathname.endsWith("/add");
     const id = String(body.id ?? "").trim();
     const r = adding ? await addAdmin(env, id, auth.user.id, deps.now()) : await removeAdmin(env, id);
     if (!r.ok) return fail(request, env, r.error === "no_kv" ? 501 : r.error === "owner" ? 409 : 400, r.error, r.message);
     console.log(adding ? "admin added" : "admin removed", id, "by", auth.user.id);
-    return json(request, env, 200, { ok: true, already: Boolean(r.already), ...(await listAdmins(env)), me: String(auth.user.id) });
+    return json(request, env, 200, { ok: true, already: Boolean(r.already), ...(await listAdmins(env, deps)), me: String(auth.user.id) });
   }
   if (url.pathname === "/api/status") return status(request, env, deps);
   if (url.pathname === "/api/update") return update(request, env, deps, body, auth.user);
