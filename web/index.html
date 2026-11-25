@@ -59,6 +59,15 @@
         </div>
         <p id="adminUpdateHint" class="dlg__text" hidden>Запуск обновления из приложения не настроен: нужен секрет GH_TOKEN в Worker (см. README). Пока запускайте Actions → Update schedule.</p>
       </details>
+      <details id="adminTeam" class="adm-data">
+        <summary id="adminTeamSummary">Админы</summary>
+        <ul id="adminTeamList" class="adm"></ul>
+        <form id="adminTeamForm" class="dlg__row" autocomplete="off">
+          <input id="adminTeamId" inputmode="numeric" pattern="[0-9]{5,15}" placeholder="Telegram ID нового админа" aria-label="Telegram ID нового админа">
+          <button id="adminTeamAdd" class="btn" type="submit">Добавить</button>
+        </form>
+        <p id="adminTeamHint" class="dlg__text"></p>
+      </details>
       <p id="adminHint" class="dlg__text"></p>
       <ul id="adminList" class="adm"></ul>
       <p id="adminStatus" class="dlg__text" role="status"></p>
