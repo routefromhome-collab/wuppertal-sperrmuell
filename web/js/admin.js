@@ -1,24 +1,21 @@
-
-Admin
- · JS
 // Панель админа: обновление данных AWG, тестовая отправка себе и публикация в канал.
 // Панель только интерфейс: права, отправку и запуск обновления выполняет Worker (проверяет подпись Telegram и ADMIN_IDS).
 import { API_URL } from "../config.js";
 import { formatLong } from "./dates.js";
 import { confirmDialog, haptic, initData, inTelegram, openExternal, telegramUserId } from "./tg.js";
- 
+
 const $ = (id) => document.getElementById(id);
 const requestIds = new Map(); // дата -> id запроса (повтор того же дня не продублирует пост в канал)
 let busy = false;
 let pollTimer = null;
 let wired = false;
- 
+
 const newId = () =>
   globalThis.crypto?.randomUUID?.() ?? `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
- 
+
 /** Текст поста для показа: HTML Telegram -> простой текст (ничего не исполняется). */
 const toPlain = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent ?? "";
- 
+
 async function api(path, payload = {}) {
   let res;
   try {
@@ -41,7 +38,7 @@ async function api(path, payload = {}) {
   }
   return data;
 }
- 
+
 /** @returns {Promise<null | {canUpdate: boolean}>} null, если пользователь не админ или панель выключена */
 export async function detectAdmin() {
   if (!API_URL || !inTelegram) return null;
@@ -52,10 +49,10 @@ export async function detectAdmin() {
     return null;
   }
 }
- 
+
 // ---------- список админов ----------
 const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString("ru-RU") : "");
- 
+
 function renderTeam(t) {
   const list = $("adminTeamList");
   list.replaceChildren();
@@ -83,7 +80,7 @@ function renderTeam(t) {
   t.extra.forEach((a) => add(a.id, `добавлен ${fmtDate(a.at)}${a.by ? `, кем: ${a.by}` : ""}`, true));
   $("adminTeamSummary").textContent = `Админы: ${t.owners.length + t.extra.length}`;
 }
- 
+
 async function loadTeam() {
   try {
     renderTeam(await api("/api/admins"));
@@ -91,7 +88,7 @@ async function loadTeam() {
     $("adminTeamHint").textContent = `Не удалось загрузить список: ${e.message}`;
   }
 }
- 
+
 async function changeTeam(path, id) {
   $("adminTeamHint").textContent = "";
   try {
@@ -103,12 +100,12 @@ async function changeTeam(path, id) {
     return null;
   }
 }
- 
+
 async function removeTeam(id) {
   if (!(await confirmDialog(`Убрать права админа у ${id}?`))) return;
   await changeTeam("/api/admins/remove", id);
 }
- 
+
 async function addTeam(e) {
   e.preventDefault();
   const id = $("adminTeamId").value.trim();
@@ -123,7 +120,7 @@ async function addTeam(e) {
     $("adminTeamHint").textContent = r.already ? "Этот пользователь уже админ." : "Добавлено. Права появятся после перезапуска приложения у него (до минуты).";
   }
 }
- 
+
 /** Объясняет простыми словами, почему кнопки админа нет. Показывается по 5 нажатиям на заголовок. */
 export async function diagnose() {
   const lines = [`Диагностика админ-панели`, `Адрес приложения: ${location.origin}`];
@@ -151,9 +148,9 @@ export async function diagnose() {
     return [...lines, `❌ ${e.message} (код ${e.code ?? e.status ?? "?"})`];
   }
 }
- 
+
 const setStatus = (text) => ($("adminStatus").textContent = text);
- 
+
 function setBusy(value) {
   busy = value;
   for (const id of ["adminSend", "adminTest", "adminReload"]) $(id).disabled = value;
@@ -161,11 +158,11 @@ function setBusy(value) {
     c.disabled = value || c.dataset.locked === "1";
   });
 }
- 
+
 // ---------- данные расписания ----------
 const fmtTime = (iso) =>
   iso ? new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
- 
+
 function describeRun(run, error) {
   if (error) return `GitHub: ${error}`;
   if (!run) return "Запусков обновления ещё не было.";
@@ -173,12 +170,12 @@ function describeRun(run, error) {
   if (run.conclusion === "success") return `✅ Последнее обновление успешно: ${fmtTime(run.updated_at)}. Сайт обновится в течение пары минут.`;
   return `❌ Последнее обновление не удалось (${run.conclusion}): ${fmtTime(run.updated_at)}.`;
 }
- 
+
 function stopPolling() {
   clearTimeout(pollTimer);
   pollTimer = null;
 }
- 
+
 async function refreshStatus({ canUpdate }) {
   stopPolling();
   try {
@@ -202,7 +199,7 @@ async function refreshStatus({ canUpdate }) {
     return null;
   }
 }
- 
+
 async function startUpdate(ctx) {
   const quick = $("adminQuick").checked;
   const force = $("adminForce").checked;
@@ -224,13 +221,13 @@ async function startUpdate(ctx) {
     $("adminUpdate").disabled = false;
   }
 }
- 
+
 // ---------- список дней ----------
 function itemNode(day) {
   const li = document.createElement("li");
   li.className = "adm__item";
   li.dataset.date = day.date;
- 
+
   const line = document.createElement("div");
   line.className = "adm__line";
   const label = document.createElement("label");
@@ -246,7 +243,7 @@ function itemNode(day) {
   status.dataset.role = "status";
   line.append(label, status);
   li.append(line);
- 
+
   for (const w of day.warnings) {
     const p = document.createElement("div");
     p.className = "adm__warn";
@@ -263,7 +260,7 @@ function itemNode(day) {
   li.dataset.canPublish = day.canPublish ? "1" : "0";
   return li;
 }
- 
+
 async function loadPreview(start, count) {
   setBusy(true);
   setStatus("Загрузка превью…");
@@ -283,9 +280,9 @@ async function loadPreview(start, count) {
     setBusy(false);
   }
 }
- 
+
 const itemOf = (date) => document.querySelector(`#adminList li[data-date="${date}"]`);
- 
+
 /** @param {boolean} test true: в админ-чат; false: в канал */
 async function send(test) {
   const items = [...document.querySelectorAll("#adminList li")].filter((li) => li.querySelector("input[type=checkbox]").checked);
@@ -297,7 +294,7 @@ async function send(test) {
     const ok = await confirmDialog(`Отправить в канал ${selected.length} дн.: ${selected[0]} … ${selected.at(-1)}?\nЭто увидят все подписчики.`);
     if (!ok) return;
   }
- 
+
   setBusy(true);
   let done = 0;
   let failed = 0;
@@ -335,7 +332,7 @@ async function send(test) {
         : `✅ Готово: отправлено в канал ${done} дн.`,
   );
 }
- 
+
 export function openAdmin({ start, days: count = 7, canUpdate = false, canManage = false }) {
   requestIds.clear();
   const ctx = { canUpdate };
@@ -347,7 +344,7 @@ export function openAdmin({ start, days: count = 7, canUpdate = false, canManage
   $("adminTeamForm").hidden = !canManage;
   $("adminTeamHint").textContent = canManage ? "" : "Добавление админов из приложения выключено: подключите KV STATE (см. README, «Админы из приложения»). Сейчас админы задаются секретом ADMIN_IDS.";
   loadTeam();
- 
+
   $("adminReload").onclick = () => !busy && loadPreview(start, count);
   $("adminSend").onclick = () => !busy && send(false);
   $("adminTest").onclick = () => !busy && send(true);
@@ -360,5 +357,3 @@ export function openAdmin({ start, days: count = 7, canUpdate = false, canManage
     $("adminRunInfo").addEventListener("click", (e) => e.target.tagName === "A" && (e.preventDefault(), openExternal(e.target.href)));
   }
 }
- 
-Claude finished the response
