@@ -1,4 +1,4 @@
-// Cloudflare Worker: публикация списка улиц в канал из Mini App (только для админов).
+// Cloudflare Worker: публикация списка улиц в канал из Mini App (только для админов)
 //
 //   POST /api/me       {initData}                          -> {ok, admin}
 //   POST /api/preview  {initData, start, days}             -> {ok, days:[{date, count, canPublish, warnings, messages}]}
