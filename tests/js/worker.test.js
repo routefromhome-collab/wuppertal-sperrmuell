@@ -57,6 +57,8 @@ function makeEnv(extra = {}) {
   return { BOT_TOKEN: TOKEN, CHANNEL_ID: "@chan", ADMIN_IDS: "111", ALLOWED_ORIGIN: ORIGIN, DATA_BASE_URL: "https://data.test/data", MAP_URL: "https://site.test/map.html", ...extra };
 }
 
+const PROFILES_TG = { 222333444: { id: 222333444, first_name: "Ivan", last_name: "Petrov", username: "ivan_p" } };
+
 function makeDeps({ tgFail = null, runs = [], dispatchStatus = 204 } = {}) {
   const sent = [];
   const gh = [];
@@ -69,6 +71,10 @@ function makeDeps({ tgFail = null, runs = [], dispatchStatus = 204 } = {}) {
     }
     if (url.endsWith("/schedule.json")) return new Response(JSON.stringify(SCHEDULE));
     if (url.endsWith("/coords.json")) return new Response(JSON.stringify(COORDS));
+    if (url.startsWith("https://api.telegram.org/") && url.includes("/getChat")) {
+      const id = new URL(url).searchParams.get("chat_id");
+      return PROFILES_TG[id] ? new Response(JSON.stringify({ ok: true, result: PROFILES_TG[id] })) : new Response(JSON.stringify({ ok: false, description: "chat not found" }), { status: 400 });
+    }
     if (url.startsWith("https://api.telegram.org/")) {
       const body = JSON.parse(init.body);
       if (tgFail && tgFail(body, sent.length)) return new Response(JSON.stringify({ ok: false, description: "Forbidden: bot is not a member" }), { status: 403 });
@@ -298,6 +304,7 @@ test("админы из приложения: добавить, пользова
   assert.equal((await (await call("/api/me", { initData: initFor(NEW) }, { env })).json()).admin, false);
   // не админ не может управлять
   assert.equal((await call("/api/admins/add", { initData: initFor(NEW), id: "222333444" }, { env })).status, 403);
+  await call("/api/me", { initData: initFor(ADMIN) }, { env }); // Worker запоминает ник владельца
   // админ добавляет
   const add = await call("/api/admins/add", { initData: initFor(ADMIN), id: " 222333444 " }, { env });
   const added = await add.json();
@@ -307,7 +314,12 @@ test("админы из приложения: добавить, пользова
   const me = await (await call("/api/me", { initData: initFor(NEW) }, { env })).json();
   assert.deepEqual([me.admin, me.canManage], [true, true]);
   const list = await (await call("/api/admins", { initData: initFor(NEW) }, { env })).json();
-  assert.deepEqual([list.owners, list.me], [["111"], "222333444"]);
+  assert.deepEqual([list.owners.map((o) => o.id), list.me], [["111"], "222333444"]);
+  // ники: у нового админа через getChat, у владельца запомнен, когда он сам открыл приложение
+  assert.equal(added.extra[0].label, "@ivan_p"); // сразу после добавления имя берётся через getChat
+  assert.equal(list.extra[0].label, "New"); // потом обновляется профилем, который прислал сам пользователь
+  assert.equal(list.owners[0].label, "@boss");
+  assert.equal(list.extra[0].byLabel, "@boss");
   // повторное добавление безвредно; владельца удалить нельзя
   assert.equal((await (await call("/api/admins/add", { initData: initFor(ADMIN), id: "222333444" }, { env })).json()).already, true);
   const own = await call("/api/admins/remove", { initData: initFor(NEW), id: "111" }, { env });
