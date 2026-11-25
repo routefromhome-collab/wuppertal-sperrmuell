@@ -1,17 +1,14 @@
-
-Worker.test
- · JS
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { verifyInitData } from "../../worker/src/auth.js";
 import { handle } from "../../worker/src/index.js";
 import { buildDayMessage, chunkText } from "../../web/js/message.js";
- 
+
 const TOKEN = "123456:TEST-token";
 const NOW = Date.parse("2026-11-23T10:00:00Z");
 const ORIGIN = "https://example.github.io";
- 
+
 /** Подписывает initData так же, как Telegram. */
 function signInitData({ user, authDate = NOW / 1000, token = TOKEN, extra = {} }) {
   const params = new URLSearchParams({ auth_date: String(authDate), query_id: "AAH", user: JSON.stringify(user), ...extra });
@@ -20,15 +17,15 @@ function signInitData({ user, authDate = NOW / 1000, token = TOKEN, extra = {} }
   params.set("hash", createHmac("sha256", secret).update(dcs).digest("hex"));
   return params.toString();
 }
- 
+
 const ADMIN = { id: 111, first_name: "Admin", username: "boss" };
 const GUEST = { id: 222, first_name: "Guest" };
- 
+
 test("initData: валидная подпись принимается", async () => {
   const r = await verifyInitData(signInitData({ user: ADMIN }), TOKEN, { nowMs: NOW });
   assert.ok(r.ok && r.user.id === 111);
 });
- 
+
 test("initData: подделка, чужой токен, просрочка, мусор отклоняются", async () => {
   const good = signInitData({ user: ADMIN });
   const tampered = good.replace("%22id%22%3A111", "%22id%22%3A999");
@@ -42,12 +39,12 @@ test("initData: подделка, чужой токен, просрочка, м�
     assert.equal((await verifyInitData(junk, TOKEN, { nowMs: NOW })).ok, false);
   }
 });
- 
+
 test("initData: поле signature входит в проверку (как в актуальном Telegram)", async () => {
   const r = await verifyInitData(signInitData({ user: ADMIN, extra: { signature: "xyz", chat_type: "private" } }), TOKEN, { nowMs: NOW });
   assert.ok(r.ok);
 });
- 
+
 // ---------- API ----------
 const SCHEDULE = {
   generated_at: "2026-11-20T00:00:00+00:00",
@@ -55,11 +52,11 @@ const SCHEDULE = {
   streets: { Achterbergweg: { dates: ["2026-11-30"] }, "Alter Markt": { dates: [], houses: { 5: ["2026-11-30"] } }, "Bachstr & Co": { dates: ["2026-12-01"] } },
 };
 const COORDS = { Achterbergweg: [51.25, 7.1], "Bachstr & Co": [51.26, 7.12] };
- 
+
 function makeEnv(extra = {}) {
   return { BOT_TOKEN: TOKEN, CHANNEL_ID: "@chan", ADMIN_IDS: "111", ALLOWED_ORIGIN: ORIGIN, DATA_BASE_URL: "https://data.test/data", MAP_URL: "https://site.test/map.html", ...extra };
 }
- 
+
 function makeDeps({ tgFail = null, runs = [], dispatchStatus = 204 } = {}) {
   const sent = [];
   const gh = [];
@@ -82,14 +79,14 @@ function makeDeps({ tgFail = null, runs = [], dispatchStatus = 204 } = {}) {
   };
   return { deps: { fetch, now: () => NOW, sleep: async () => {} }, sent, gh };
 }
- 
+
 function call(path, payload, { env = makeEnv(), deps, origin = ORIGIN } = {}) {
   const req = new Request(`https://worker.test${path}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(payload) });
   return handle(req, env, deps ?? makeDeps().deps);
 }
- 
+
 const initFor = (user) => signInitData({ user });
- 
+
 test("/api/me: админ и не админ", async () => {
   assert.deepEqual(await (await call("/api/me", { initData: initFor(ADMIN) })).json(), { ok: true, admin: true, canUpdate: false, canManage: false });
   assert.deepEqual(await (await call("/api/me", { initData: initFor(GUEST) })).json(), { ok: true, admin: false, canUpdate: false, canManage: false });
@@ -97,12 +94,12 @@ test("/api/me: админ и не админ", async () => {
   assert.equal((await (await call("/api/me", { initData: initFor(ADMIN) }, { env: withGh })).json()).canUpdate, true);
   assert.equal((await (await call("/api/me", { initData: initFor(GUEST) }, { env: withGh })).json()).canUpdate, false);
 });
- 
+
 test("чужой Origin и неверная подпись отклоняются", async () => {
   assert.equal((await call("/api/me", { initData: initFor(ADMIN) }, { origin: "https://evil.example" })).status, 403);
   assert.equal((await call("/api/me", { initData: initFor(ADMIN).replace("hash=", "hash=00") })).status, 401);
 });
- 
+
 test("не админ не получает ни preview, ни publish и ничего не уходит в Telegram", async () => {
   const { deps, sent } = makeDeps();
   const a = await call("/api/preview", { initData: initFor(GUEST), start: "2026-11-29" }, { deps });
@@ -110,7 +107,7 @@ test("не админ не получает ни preview, ни publish и нич
   assert.deepEqual([a.status, b.status], [403, 403]);
   assert.equal(sent.length, 0);
 });
- 
+
 test("preview: 7 дней, правило D-1 и запрет на даты вне календаря", async () => {
   const res = await (await call("/api/preview", { initData: initFor(ADMIN), start: "2026-11-29" })).json();
   assert.equal(res.days.length, 7);
@@ -122,7 +119,7 @@ test("preview: 7 дней, правило D-1 и запрет на даты вн
   const far = await (await call("/api/preview", { initData: initFor(ADMIN), start: "2027-06-01", days: 1 })).json();
   assert.equal(far.days[0].canPublish, false);
 });
- 
+
 test("publish: отправляет в канал, экранирует HTML, один день за запрос", async () => {
   const { deps, sent } = makeDeps();
   const r = await call("/api/publish", { initData: initFor(ADMIN), date: "2026-11-30", requestId: "req-12345678" }, { deps });
@@ -135,14 +132,14 @@ test("publish: отправляет в канал, экранирует HTML, о
   assert.ok(sent[0].text.includes("map.html?d=2026-11-30") && sent[0].text.endsWith("#шпера"));
   assert.ok(!JSON.stringify(out).includes(TOKEN));
 });
- 
+
 test("publish: дата вне календаря AWG отклоняется (нет ложного «выходной»)", async () => {
   const { deps, sent } = makeDeps();
   const r = await call("/api/publish", { initData: initFor(ADMIN), date: "2027-06-01", requestId: "req-12345678" }, { deps });
   assert.equal(r.status, 409);
   assert.equal(sent.length, 0);
 });
- 
+
 test("publish: повтор с тем же requestId не дублирует пост (KV)", async () => {
   const store = new Map();
   const env = makeEnv({ STATE: { get: async (k) => store.get(k) ?? null, put: async (k, v) => void store.set(k, v) } });
@@ -153,7 +150,7 @@ test("publish: повтор с тем же requestId не дублирует п�
   assert.ok(again.duplicate);
   assert.equal(sent.length, 1);
 });
- 
+
 test("publish: ошибка Telegram возвращается админу без токена и не помечается выполненной", async () => {
   const store = new Map();
   const env = makeEnv({ STATE: { get: async (k) => store.get(k) ?? null, put: async (k, v) => void store.set(k, v) } });
@@ -165,14 +162,14 @@ test("publish: ошибка Telegram возвращается админу бе�
   assert.ok(!JSON.stringify(out).includes(TOKEN));
   assert.equal(store.size, 0);
 });
- 
+
 test("publish: плохие входные данные", async () => {
   const base = { initData: initFor(ADMIN) };
   assert.equal((await call("/api/publish", { ...base, date: "2026-13-40", requestId: "req-12345678" })).status, 400);
   assert.equal((await call("/api/publish", { ...base, date: "2026-11-30" })).status, 400);
   assert.equal((await call("/api/publish", { ...base, date: "2026-11-30", requestId: "x" })).status, 400);
 });
- 
+
 test("длинный день режется на части не длиннее 4000 символов", () => {
   const stops = Array.from({ length: 400 }, (_, i) => ({ name: `Teststraße ${i}` }));
   const text = buildDayMessage({ iso: "2026-11-29", stops, coords: {}, mapUrl: "https://site.test/map.html" });
@@ -180,7 +177,7 @@ test("длинный день режется на части не длиннее
   assert.ok(chunks.length > 1 && chunks.every((c) => c.length <= 4000));
   assert.equal(chunks.join("\n").replace(/\n+/g, "\n"), text.replace(/\n+/g, "\n"));
 });
- 
+
 test("формат поста совпадает с рабочим main.py", () => {
   const text = buildDayMessage({ iso: "2026-11-29", stops: [{ name: "Bachstr" }], coords: { Bachstr: [51.25, 7.15] }, mapUrl: "https://site.test/map.html" });
   assert.match(text, /^🗑 <b>Шпера 29 November 2026:<\/b>\n\nBachstr <a href=".*query=Bachstra%C3%9Fe%2C%20Wuppertal">map<\/a>/);
@@ -188,8 +185,8 @@ test("формат поста совпадает с рабочим main.py", () 
   assert.ok(text.includes("\n📍Полная карта на 29 November 2026: <a href=\"https://site.test/map.html?d=2026-11-29\">map</a>"));
   assert.equal(buildDayMessage({ iso: "2026-11-29", stops: [], coords: {} }), "✅ 29 November 2026 выходной.\n\n#шпера");
 });
- 
- 
+
+
 // ---------- тест, статус и запуск обновления ----------
 test("test=true уходит в ADMIN_CHAT_ID, а не в канал, и не помечает день выполненным", async () => {
   const store = new Map();
@@ -207,14 +204,14 @@ test("test=true уходит в ADMIN_CHAT_ID, а не в канал, и не п
   assert.ok(real.ok && !real.duplicate);
   assert.equal(sent.at(-2).chat_id, "@chan");
 });
- 
+
 test("test=true без ADMIN_CHAT_ID: отказ, канал не затронут", async () => {
   const { deps, sent } = makeDeps();
   const r = await call("/api/publish", { initData: initFor(ADMIN), date: "2026-11-30", requestId: "req-12345678", test: true }, { deps });
   assert.equal(r.status, 500);
   assert.equal(sent.length, 0);
 });
- 
+
 test("test разрешён и на дату вне календаря (это только проверка), публикация в канал нет", async () => {
   const env = makeEnv({ ADMIN_CHAT_ID: "999" });
   const { deps, sent } = makeDeps();
@@ -223,9 +220,9 @@ test("test разрешён и на дату вне календаря (это �
   assert.equal((await call("/api/publish", base, { env, deps })).status, 409);
   assert.deepEqual(sent.map((m) => m.chat_id), ["999"]);
 });
- 
+
 const GH_ENV = { GH_TOKEN: "ghp_secret", GITHUB_REPO: "o/r", ADMIN_CHAT_ID: "999" };
- 
+
 test("update: запускает workflow с нужными параметрами; токен GitHub не утекает", async () => {
   const { deps, gh } = makeDeps();
   const r = await call("/api/update", { initData: initFor(ADMIN), force: true, quick: true }, { env: makeEnv(GH_ENV), deps });
@@ -240,19 +237,19 @@ test("update: запускает workflow с нужными параметрам
   await call("/api/update", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps: full.deps });
   assert.deepEqual(full.gh.at(-1).body.inputs, { force: "false", limit: "" });
 });
- 
+
 test("update: не админ, нет GH_TOKEN, уже идёт запуск, ошибка GitHub", async () => {
   const guest = makeDeps();
   assert.equal((await call("/api/update", { initData: initFor(GUEST) }, { env: makeEnv(GH_ENV), deps: guest.deps })).status, 403);
   assert.equal(guest.gh.length, 0);
- 
+
   assert.equal((await call("/api/update", { initData: initFor(ADMIN) })).status, 501);
- 
+
   const busy = makeDeps({ runs: [{ status: "in_progress", conclusion: null }] });
   const b = await call("/api/update", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps: busy.deps });
   assert.equal(b.status, 409);
   assert.ok(!busy.gh.some((c) => c.url.endsWith("/dispatches")));
- 
+
   const bad = makeDeps({ dispatchStatus: 404 });
   const e = await call("/api/update", { initData: initFor(ADMIN) }, { env: makeEnv(GH_ENV), deps: bad.deps });
   const out = await e.json();
@@ -260,7 +257,7 @@ test("update: не админ, нет GH_TOKEN, уже идёт запуск, о
   assert.match(out.message, /не найден/);
   assert.ok(!JSON.stringify(out).includes("ghp_secret"));
 });
- 
+
 test("status: возраст данных и последний запуск; для не админа закрыт", async () => {
   const run = { status: "completed", conclusion: "success", created_at: "2026-11-24T10:00:00Z", updated_at: "2026-11-24T10:20:00Z", html_url: "https://github.com/o/r/actions/runs/1", event: "workflow_dispatch" };
   const { deps } = makeDeps({ runs: [run] });
@@ -275,7 +272,7 @@ test("status: возраст данных и последний запуск; д
   assert.equal(noGh.run, null);
   assert.equal((await call("/api/status", { initData: initFor(GUEST) }, { env: makeEnv(GH_ENV), deps: makeDeps({ runs: [run] }).deps })).status, 403);
 });
- 
+
 test("отказ подписи объясняет причину; без BOT_TOKEN понятная ошибка", async () => {
   const wrongToken = signInitData({ user: ADMIN, token: "999:another-bot" });
   const r = await call("/api/me", { initData: wrongToken });
@@ -288,12 +285,12 @@ test("отказ подписи объясняет причину; без BOT_TO
   const old = await (await call("/api/me", { initData: signInitData({ user: ADMIN, authDate: NOW / 1000 - 999999 }) })).json();
   assert.equal(old.error, "expired");
 });
- 
+
 const kvEnv = (extra = {}) => {
   const store = new Map();
   return makeEnv({ STATE: { get: async (k) => store.get(k) ?? null, put: async (k, v) => void store.set(k, v) }, ...extra });
 };
- 
+
 test("админы из приложения: добавить, пользоваться правами, удалить; владельца удалить нельзя", async () => {
   const env = kvEnv();
   const NEW = { id: 222333444, first_name: "New" };
@@ -320,7 +317,7 @@ test("админы из приложения: добавить, пользова
   assert.equal((await rm.json()).extra.length, 0);
   assert.equal((await (await call("/api/me", { initData: initFor(NEW) }, { env })).json()).admin, false);
 });
- 
+
 test("админы из приложения: проверка ID и отсутствие KV", async () => {
   const env = kvEnv();
   for (const bad of ["abc", "12", "1234567890123456", "1 2 3 4 5", ""]) {
@@ -331,5 +328,3 @@ test("админы из приложения: проверка ID и отсут�
   assert.equal(noKv.status, 501);
   assert.equal((await (await call("/api/me", { initData: initFor(ADMIN) })).json()).canManage, false);
 });
- 
-Claude finished the response
