@@ -31,3 +31,25 @@ export async function sendMessage(fetchFn, token, chatId, text, { html = true, m
   }
   return { ok: false, status: 502, description: "telegram unreachable" };
 }
+
+/** Профиль пользователя по ID (работает, если он когда-либо писал боту). @returns {Promise<{username?: string, name?: string} | null>} */
+export async function getProfile(fetchFn, token, userId) {
+  try {
+    const res = await fetchFn(`https://api.telegram.org/bot${token}/getChat?chat_id=${encodeURIComponent(userId)}`);
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) return null;
+    const c = data.result ?? {};
+    return profileOf({ username: c.username, first_name: c.first_name, last_name: c.last_name });
+  } catch {
+    return null;
+  }
+}
+
+/** Из объекта пользователя Telegram оставляем только то, что показываем в списке админов. */
+export function profileOf(u) {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  const out = {};
+  if (u.username) out.username = String(u.username);
+  if (name) out.name = name;
+  return out.username || out.name ? out : null;
+}
